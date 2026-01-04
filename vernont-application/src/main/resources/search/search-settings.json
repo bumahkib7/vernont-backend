@@ -1,0 +1,124 @@
+{
+  "analysis": {
+    "filter": {
+      "autocomplete_filter": {
+        "type": "edge_ngram",
+        "min_gram": 2,
+        "max_gram": 20
+      },
+      "english_stemmer": {
+        "type": "stemmer",
+        "language": "english"
+      },
+      "synonym_filter": {
+        "type": "synonym_graph",
+        "lenient": true,
+        "synonyms": [
+          "sneakers, trainers, kicks, athletic shoes, running shoes",
+          "boots, booties, ankle boots",
+          "sandals, flip-flops, slides, thongs",
+          "heels, pumps, stilettos, high heels",
+          "flats, loafers, slip-ons, moccasins, ballet flats",
+          "slippers, house shoes",
+          "espadrilles, wedges",
+          "oxfords, brogues, derby shoes",
+          "hoodie, hoody, sweatshirt, pullover",
+          "joggers, sweatpants, track pants, tracksuit bottoms",
+          "coat, jacket, outerwear, blazer",
+          "parka, anorak, windbreaker",
+          "cardigan, sweater, jumper, pullover",
+          "vest, waistcoat, gilet",
+          "denim, jeans, blue jeans",
+          "tee, t-shirt, tshirt, top, shirt",
+          "pants, trousers, slacks, bottoms",
+          "shorts, bermudas, cut-offs",
+          "dress, frock, gown, sundress",
+          "skirt, mini skirt, midi skirt, maxi skirt",
+          "leggings, tights, yoga pants",
+          "romper, jumpsuit, playsuit, overalls",
+          "blouse, button-up, button-down",
+          "polo, polo shirt, golf shirt",
+          "tank top, vest, cami, camisole",
+          "bikini, swimsuit, bathing suit, swimwear",
+          "underwear, undergarments, briefs, boxers, panties",
+          "bra, brassiere, sports bra",
+          "socks, hosiery, stockings",
+          "scarf, shawl, wrap, pashmina",
+          "hat, cap, beanie, snapback",
+          "gloves, mittens",
+          "belt, waistband, sash",
+          "tie, necktie, bowtie",
+          "handbag, purse, bag, tote, shoulder bag",
+          "backpack, rucksack, knapsack, daypack",
+          "wallet, billfold, coin purse",
+          "clutch, evening bag, pouch",
+          "sunglasses, shades, sunnies, eyewear",
+          "watch, timepiece, wristwatch, smartwatch",
+          "bracelet, bangle, cuff",
+          "necklace, pendant, chain",
+          "earrings, studs, hoops, dangles",
+          "ring, band",
+          "nike, swoosh",
+          "adidas, 3 stripes, three stripes",
+          "puma, formstrip",
+          "leather, genuine leather, full grain leather, top grain",
+          "suede, nubuck",
+          "cotton, 100% cotton, organic cotton",
+          "wool, merino, cashmere",
+          "synthetic, man-made, polyester, nylon",
+          "denim, chambray",
+          "silk, satin",
+          "linen, flax",
+          "velvet, velour",
+          "casual, everyday, relaxed, laid-back",
+          "formal, dress, business, professional",
+          "athletic, sport, active, performance, activewear",
+          "vintage, retro, classic, throwback",
+          "bohemian, boho, hippie",
+          "preppy, ivy league, collegiate",
+          "streetwear, urban, street style",
+          "minimalist, simple, clean",
+          "luxury, premium, high-end, designer"
+        ]
+      }
+    },
+    "analyzer": {
+      "search_text": {
+        "type": "custom",
+        "tokenizer": "standard",
+        "filter": [
+          "lowercase",
+          "asciifolding",
+          "synonym_filter",
+          "english_stemmer"
+        ]
+      },
+      "autocomplete_index": {
+        "type": "custom",
+        "tokenizer": "standard",
+        "filter": [
+          "lowercase",
+          "asciifolding",
+          "autocomplete_filter"
+        ]
+      },
+      "autocomplete_search": {
+        "type": "custom",
+        "tokenizer": "standard",
+        "filter": [
+          "lowercase",
+          "asciifolding"
+        ]
+      }
+    },
+    "normalizer": {
+      "lowercase_normalizer": {
+        "type": "custom",
+        "filter": [
+          "lowercase",
+          "asciifolding"
+        ]
+      }
+    }
+  }
+}

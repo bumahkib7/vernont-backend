@@ -1,0 +1,53 @@
+# Gradle files
+.gradle/
+build/
+gradle-home/
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.*env
+.kotlin
+
+# Jar files
+*.jar
+*.war
+*.ear
+
+# Kotlin/Java specific
+*.class
+*.kotlin_module
+
+# macOS specific
+.DS_Store
+
+
+
+# Logs and temporary files
+*.log
+*~
+#*#
+.#*
+
+# Deployment artifacts (generated during deployment)
+deployment.zip
+Dockerrun.aws.json
+
+# Secrets and environment files - NEVER COMMIT THESE
+.env
+.env.local
+.env.*.local
+*.secret
+*.key
+secrets/
+credentials/
+private/
+
+/build
+/.kotlin
+/.gradle

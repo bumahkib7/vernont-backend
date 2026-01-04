@@ -1,0 +1,73 @@
+# Workflow Engine Configuration
+nexus:
+  workflow:
+    # Default timeout for workflow executions (seconds)
+    default-timeout-seconds: 300
+    
+    # Lock timeout for distributed coordination (seconds)
+    lock-timeout-seconds: 60
+    
+    # Default max retries for failed workflows
+    max-retries: 3
+    
+    # Redis configuration for distributed locking
+    redis:
+      address: redis://localhost:6379
+      database: 0
+    
+    # Cleanup configuration
+    cleanup:
+      enabled: true
+      retention-days: 30
+
+  # JWT Configuration for workflows
+  jwt:
+    secret: "a-very-long-and-secure-secret-key-for-workflows-that-is-at-least-256-bits"
+    expiration-ms: 3600000 # 1 hour
+
+# Spring configuration
+spring:
+  # JPA configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+        
+  # Redis configuration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,workflow
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      simple:
+        enabled: true
+
+# Logging
+logging:
+  level:
+    com.vernont.workflow: INFO
+    org.springframework.scheduling: DEBUG

@@ -1,0 +1,246 @@
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+  application:
+    name: vernont
+
+  web:
+    resources:
+      add-mappings: true
+
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/vernont}
+    username: ${DATABASE_USER:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${HIKARI_MAX_POOL_SIZE:20}
+      minimum-idle: ${HIKARI_MIN_IDLE:5}
+      connection-timeout: ${HIKARI_CONNECTION_TIMEOUT:30000}
+      idle-timeout: ${HIKARI_IDLE_TIMEOUT:600000}
+      max-lifetime: ${HIKARI_MAX_LIFETIME:1800000}
+
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_HIBERNATE_DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: ${HIBERNATE_FORMAT_SQL:false}
+        use_sql_comments: ${HIBERNATE_USE_SQL_COMMENTS:false}
+        jdbc:
+          batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:20}
+        order_inserts: ${HIBERNATE_ORDER_INSERTS:true}
+        order_updates: ${HIBERNATE_ORDER_UPDATES:true}
+        id:
+          db_structure_naming_strategy: legacy
+        type:
+          preferred_uuid_jdbc_type: VARCHAR
+        cache:
+          use_second_level_cache: ${HIBERNATE_SECOND_LEVEL_CACHE:true}
+          use_query_cache: ${HIBERNATE_QUERY_CACHE:true}
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+        javax.cache.spi.CachingProvider: org.ehcache.jsr107.EhcacheCachingProvider
+
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
+    validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:true}
+    location: ${FLYWAY_LOCATION:classpath:/db/migration}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
+      timeout: ${REDIS_TIMEOUT:60000ms}
+      lettuce:
+        pool:
+          max-active: ${REDIS_POOL_MAX_ACTIVE:8}
+          max-idle: ${REDIS_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_POOL_MIN_IDLE:2}
+
+  cache:
+    type: redis
+    cache-names: search-results,search-suggestions
+    redis:
+      time-to-live: ${CACHE_DEFAULT_TTL:300000}
+      cache-null-values: false
+      use-key-prefix: true
+      key-prefix: "vernont:cache:"
+
+  session:
+    store-type: redis
+    timeout: ${SPRING_SESSION_TIMEOUT:1800s}
+    redis:
+      namespace: ${SPRING_SESSION_REDIS_NAMESPACE:vernont:session}
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:}
+          jwk-set-uri: ${JWT_JWK_SET_URI:}
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+            scope:
+              - openid
+              - email
+              - profile
+        provider:
+          google:
+            issuer-uri: https://accounts.google.com
+
+    headers:
+      frame-options: ${SECURITY_HEADERS_FRAME_OPTIONS:DENY}
+      content-type-options: ${SECURITY_HEADERS_CONTENT_TYPE_OPTIONS:nosniff}
+      xss-protection: ${SECURITY_HEADERS_XSS_PROTECTION:"1; mode=block"}
+      referrer-policy: ${SECURITY_HEADERS_REFERRER_POLICY:"strict-origin-when-cross-origin"}
+
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080,http://localhost:3001}
+      allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
+      allowed-headers: ${CORS_ALLOWED_HEADERS:Authorization,Content-Type,X-Request-Id}
+      allow-credentials: true
+      max-age: 3600
+
+  jackson:
+    time-zone: UTC
+    default-property-inclusion: non_null
+
+server:
+  port: ${PORT:8080}
+  servlet:
+    context-path: ${SERVER_CONTEXT_PATH:/}
+  error:
+    include-message: ${SERVER_ERROR_INCLUDE_MESSAGE:always}
+    include-binding-errors: ${SERVER_ERROR_INCLUDE_BINDING_ERRORS:always}
+    include-stacktrace: ${SERVER_ERROR_INCLUDE_STACKTRACE:on_param}
+  compression:
+    enabled: ${SERVER_COMPRESSION_ENABLED:true}
+    mime-types: ${SERVER_COMPRESSION_MIME_TYPES:application/json,application/xml,text/html,text/xml,text/plain}
+
+# AWS S3 / MinIO Configuration
+aws:
+  s3:
+    bucket-name: ${AWS_S3_BUCKET:vernont}
+    region: ${AWS_REGION:us-east-1}
+    url-expiration-hours: ${AWS_S3_URL_EXPIRATION_HOURS:24}
+    endpoint-url: ${AWS_S3_ENDPOINT:}
+  credentials:
+    access-key: ${AWS_ACCESS_KEY:minioadmin}
+    secret-key: ${AWS_SECRET_KEY:minioadmin}
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${ACTUATOR_EXPOSED_ENDPOINTS:health,info,metrics,prometheus}
+      base-path: ${ACTUATOR_BASE_PATH:/actuator}
+      cors:
+        allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
+        allowed-methods: GET,POST
+  endpoint:
+    health:
+      show-details: ${ACTUATOR_HEALTH_SHOW_DETAILS:when-authorized}
+      show-components: when-authorized
+      probes:
+        enabled: true
+    prometheus:
+      enabled: true
+    metrics:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${SPRING_PROFILES_ACTIVE:dev}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+    export:
+      prometheus:
+        enabled: ${ACTUATOR_PROMETHEUS_ENABLED:true}
+        step: 10s
+        descriptions: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    redis:
+      enabled: true
+    db:
+      enabled: true
+
+# Application Configuration
+app:
+  jwt:
+    secret: ${JWT_SECRET:69df2472bc8e9bf6d554dfc62bcf12dec4d0168a4abba489e7adf8deccfe7f22b3710eea5d92001fe5adb4337db15face3afd65dba4509f5237297102d382c3a}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
+
+  admin:
+    bootstrap:
+      enabled: ${ADMIN_BOOTSTRAP_ENABLED:true}
+      email: ${ADMIN_BOOTSTRAP_EMAIL:admin@vernont.com}
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:admin123}
+    defaults:
+      roles:
+        - ADMIN
+
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:noreply@vernont.com}
+    from-name: ${MAIL_FROM_NAME:Vernont}
+
+  admin-url: ${ADMIN_URL:http://localhost:3000}
+
+  security:
+    argon2:
+      iterations: ${ARGON2_ITERATIONS:3}
+      memory: ${ARGON2_MEMORY:65536}
+      parallelism: ${ARGON2_PARALLELISM:1}
+    rate-limit:
+      login:
+        attempts: ${LOGIN_RATE_LIMIT_ATTEMPTS:5}
+        window-minutes: ${LOGIN_RATE_LIMIT_WINDOW:15}
+      register:
+        attempts: ${REGISTER_RATE_LIMIT_ATTEMPTS:3}
+        window-minutes: ${REGISTER_RATE_LIMIT_WINDOW:60}
+
+# HTTP-Only Cookie Auth Configuration
+auth:
+  cookie:
+    secure: ${AUTH_COOKIE_SECURE:false}
+    same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
+    domain: ${AUTH_COOKIE_DOMAIN:localhost}
+    access-token-max-age: ${AUTH_COOKIE_ACCESS_TOKEN_MAX_AGE:900}
+    refresh-token-max-age: ${AUTH_COOKIE_REFRESH_TOKEN_MAX_AGE:604800}
+
+# Stripe Payment Configuration
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY:}
+  publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  enabled: ${STRIPE_ENABLED:true}
+
+logging:
+  level:
+    root: ${LOG_ROOT_LEVEL:INFO}
+    com.vernont: ${LOG_VERNONT_LEVEL:INFO}
+    org.springframework.web: ${LOG_SPRING_WEB_LEVEL:INFO}
+    org.springframework.security.web.ObservationFilterChainDecorator: OFF

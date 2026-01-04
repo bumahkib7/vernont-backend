@@ -1,0 +1,585 @@
+- category_id: aa
+  synonyms:
+  - clothing accessories
+  - handbag & wallet accessories
+  - shoes
+  - shoe accessories
+  - costumes & accessories
+  - jewelry
+  - handbags, wallets & cases
+  - clothing
+- category_id: aa-1
+  synonyms:
+  - swimwear
+  - clothing tops
+  - shorts
+  - socks
+  - activewear
+  - men's undergarments
+  - outfit sets
+  - wedding & bridal party dresses
+  - outerwear
+  - girls' underwear
+  - skirts
+  - lingerie
+  - one-pieces
+  - dresses
+  - skorts
+  - sleepwear & loungewear
+  - uniforms & workwear
+  - pants
+  - boys' underwear
+  - maternity clothing
+  - suits
+  - traditional & ceremonial clothing
+  - baby & toddler clothing
+- category_id: aa-1-1
+  synonyms:
+  - activewear vests & jackets
+  - activewear pants
+  - activewear tops
+  - sports bras
+  - leotards & unitards
+  - activewear sweatshirts & hoodies
+  - boxing shorts
+  - dance dresses, skirts & costumes
+- category_id: aa-1-1-1
+  synonyms:
+  - leggings
+  - training pants
+  - sweatpants
+  - tights
+  - track pants
+  - joggers
+  - shorts
+  - wind pants
+- category_id: aa-1-1-2
+  synonyms:
+  - tank tops
+  - crop tops
+  - t-shirts
+- category_id: aa-1-1-7
+  synonyms:
+  - track jackets
+  - hoodies
+  - sweatshirts
+- category_id: aa-1-1-8
+  synonyms:
+  - jackets
+  - vests
+- category_id: aa-1-2
+  synonyms:
+  - baby & toddler bottoms
+  - baby & toddler socks & tights
+  - baby & toddler tops
+  - baby one-pieces
+  - baby & toddler diaper covers
+  - baby & toddler outerwear
+  - baby & toddler swimwear
+  - baby & toddler sleepwear
+  - baby & toddler outfits
+  - baby & toddler dresses
+  - toddler underwear
+- category_id: aa-1-2-1
+  synonyms:
+  - jeggings
+  - leggings
+  - trousers
+  - sweatpants
+  - chinos
+  - joggers
+  - skorts
+  - skirts
+  - jeans
+  - cargos
+- category_id: aa-1-2-4
+  synonyms:
+  - snow pants & suits
+  - baby & toddler coats & jackets
+- category_id: aa-1-2-4-17
+  synonyms:
+  - motorcycle outerwear
+  - windbreakers
+  - trench coats
+  - track jackets
+  - overcoats
+  - bomber jackets
+  - ponchos
+  - parkas
+  - capes
+  - sport jackets
+  - rain coats
+  - puffer jackets
+  - bolero jackets
+  - trucker jackets
+  - pea coats
+  - wrap coats
+- category_id: aa-1-2-8
+  synonyms:
+  - swim dresses
+  - one-piece swimsuits
+  - skirtinis
+  - surf tops
+  - swimwear tops
+  - classic bikinis
+  - cover ups
+  - rash guards
+  - swim jammers
+  - swim boxers
+  - swim trunks
+  - burkinis
+  - swim briefs
+- category_id: aa-1-2-9
+  synonyms:
+  - overshirts
+  - tunics
+  - cardigans
+  - shirts
+  - hoodies
+  - t-shirts
+  - polos
+  - bodysuits
+  - sweaters
+  - sweatshirts
+- category_id: aa-1-2-11
+  synonyms:
+  - briefs
+  - training pants
+  - boxer briefs
+  - panties
+  - boxers
+- category_id: aa-1-3
+  synonyms:
+  - boys' undershirts
+  - boys' long johns
+  - boys' underpants
+- category_id: aa-1-3-2
+  synonyms:
+  - briefs
+  - boxer shorts
+  - boxer briefs
+  - trunks
+  - midway briefs
+- category_id: aa-1-5
+  synonyms:
+  - girls' long johns
+  - girls' undershirts
+  - girls' underpants
+- category_id: aa-1-5-2
+  synonyms:
+  - briefs
+  - hipsters
+  - period underwear
+  - boxer briefs
+  - thongs
+  - panties
+  - bikinis
+  - boyshorts
+- category_id: aa-1-5-3
+  synonyms:
+  - first bras
+- category_id: aa-1-6
+  synonyms:
+  - women's underwear slips
+  - bra accessories
+  - bras
+  - women's undershirts
+  - women's underpants
+  - petticoats & pettipants
+  - hosiery
+  - camisoles
+  - lingerie accessories
+  - jock straps
+  - shapewear
+  - bodysuits
+- category_id: aa-1-6-2
+  synonyms:
+  - breast petals & concealers
+  - bra straps & extenders
+  - breast enhancing inserts
+  - bra strap pads
+- category_id: aa-1-6-8
+  synonyms:
+  - garter belts
+  - pantyhose
+  - garters
+- category_id: aa-1-6-10
+  synonyms:
+  - thigh slimmers
+  - full body shapes
+  - high waisted briefs
+  - bodysuits
+  - waist cinchers
+- category_id: aa-1-6-11
+  synonyms:
+  - briefs
+  - g-strings
+  - period underwear
+  - thongs
+  - bikinis
+  - boyshorts
+- category_id: aa-1-7
+  synonyms:
+  - nursing bras
+  - maternity one-pieces
+  - maternity sleepwear
+  - maternity tops
+  - maternity dresses
+  - maternity skirts
+  - maternity swimwear
+  - maternity pants
+- category_id: aa-1-7-4
+  synonyms:
+  - jeggings
+  - leggings
+  - trousers
+  - chinos
+  - joggers
+  - skorts
+  - jeans
+  - cargos
+- category_id: aa-1-7-7
+  synonyms:
+  - swim dresses
+  - one-piece swimsuits
+  - swimwear tops
+  - classic bikinis
+  - cover ups
+  - swim boxers
+  - burkinis
+- category_id: aa-1-7-8
+  synonyms:
+  - overshirts
+  - tunics
+  - cardigans
+  - blouses
+  - shirts
+  - nursing shirts
+  - t-shirts
+  - bodysuits
+- category_id: aa-1-8
+  synonyms:
+  - men's undershirts
+  - men's long johns
+  - men's underwear
+- category_id: aa-1-8-3
+  synonyms:
+  - briefs
+  - boxer shorts
+  - boxer briefs
+  - thongs
+  - jockstraps
+  - trunks
+  - undershorts
+  - midway briefs
+- category_id: aa-1-10
+  synonyms:
+  - motorcycle outerwear
+  - chaps
+  - snow pants & suits
+  - vests
+  - rain suits
+  - coats & jackets
+  - rain pants
+- category_id: aa-1-10-2
+  synonyms:
+  - windbreakers
+  - trench coats
+  - track jackets
+  - overcoats
+  - bomber jackets
+  - ponchos
+  - parkas
+  - capes
+  - sport jackets
+  - rain coats
+  - puffer jackets
+  - bolero jackets
+  - trucker jackets
+  - varsity jackets
+  - pea coats
+  - wrap coats
+- category_id: aa-1-12
+  synonyms:
+  - jeggings
+  - leggings
+  - trousers
+  - chinos
+  - joggers
+  - cargo pants
+  - jeans
+- category_id: aa-1-13
+  synonyms:
+  - overshirts
+  - tank tops
+  - tunics
+  - cardigans
+  - blouses
+  - shirts
+  - hoodies
+  - t-shirts
+  - polos
+  - bodysuits
+  - sweaters
+  - sweatshirts
+- category_id: aa-1-14
+  synonyms:
+  - short trousers
+  - chino shorts
+  - jegging shorts
+  - cargo shorts
+  - denim shorts
+  - jogger shorts
+  - bermudas
+  - legging shorts
+- category_id: aa-1-17
+  synonyms:
+  - pajamas
+  - long johns
+  - onesies
+  - nightgowns
+  - robes
+  - loungewear
+- category_id: aa-1-17-2
+  synonyms:
+  - loungewear bottoms
+  - loungewear tops
+- category_id: aa-1-17-2-1
+  synonyms:
+  - leggings
+  - joggers
+  - shorts
+  - boxers
+  - skirts
+- category_id: aa-1-18
+  synonyms:
+  - sneaker socks
+  - dance socks
+  - footie socks
+  - knee socks
+  - athletic socks
+  - hold up socks
+  - heel socks
+  - panty socks
+  - ankle socks
+  - crew socks
+- category_id: aa-1-19
+  synonyms:
+  - skirt suits
+  - tuxedos
+  - pant suits
+- category_id: aa-1-20
+  synonyms:
+  - swim dresses
+  - one-piece swimsuits
+  - boardshorts
+  - surf tops
+  - swimwear tops
+  - classic bikinis
+  - cover ups
+  - rash guards
+  - swim boxers
+  - period swimwear
+  - burkinis
+  - swim briefs
+- category_id: aa-1-22
+  synonyms:
+  - bridal party dresses
+  - wedding dresses
+- category_id: aa-1-23
+  synonyms:
+  - kimonos
+  - saris & lehengas
+- category_id: aa-1-24
+  synonyms:
+  - flight suits
+  - sports uniforms
+  - food service uniforms
+  - scrubs
+  - contractor pants & coveralls
+  - white coats
+  - school uniforms
+  - military uniforms
+  - security uniforms
+- category_id: aa-2
+  synonyms:
+  - hand muffs
+  - traditional clothing accessories
+  - wristbands
+  - handkerchiefs
+  - collar stays
+  - pinback buttons
+  - sunglasses
+  - neck gaiters
+  - hair accessories
+  - bandanas & headties
+  - maternity belts & support bands
+  - scarves & shawls
+  - leis
+  - earmuffs
+  - suspenders
+  - gloves & mittens
+  - hats
+  - baby & toddler clothing accessories
+  - cufflinks
+  - tie clips
+  - arm warmers & sleeves
+  - headwear
+  - fashion face masks
+  - belt buckles
+  - leg warmers
+  - neckties
+  - decorative fans
+  - sashes
+  - button studs
+  - balaclavas
+  - belts
+  - bridal accessories
+- category_id: aa-2-2
+  synonyms:
+  - baby & toddler hats
+  - baby & toddler gloves & mittens
+  - baby & toddler belts
+  - baby protective wear
+- category_id: aa-2-14
+  synonyms:
+  - hair extensions
+  - hair bands
+  - wigs
+  - hair forks & sticks
+  - wig accessories
+  - hair nets
+  - hair pins, claws & clips
+  - headbands
+  - ponytail holders
+  - tiaras
+  - hair combs
+  - hair bun & volume shapers
+  - hair wreaths
+- category_id: aa-2-17
+  synonyms:
+  - berets
+  - snapback caps
+  - visors
+  - sun hats
+  - panama hats
+  - bucket hats
+  - fedoras
+  - trilbies
+  - cowboy hats
+  - winter hats
+  - trucker hats
+  - top hats
+  - flat caps
+  - baseball caps
+  - beanies
+  - bowler hats
+- category_id: aa-2-18
+  synonyms:
+  - fascinators
+  - turbans
+  - headdresses
+- category_id: aa-3
+  synonyms:
+  - costume accessories
+  - costume shoes
+  - costumes
+  - masks
+- category_id: aa-3-3
+  synonyms:
+  - costume sets
+  - costume dresses
+- category_id: aa-4
+  synonyms:
+  - wallet chains
+  - keychains
+  - lanyards
+- category_id: aa-5
+  synonyms:
+  - checkbook covers
+  - wallets & money clips
+  - business card cases
+  - handbags
+  - badge & pass holders
+- category_id: aa-5-4
+  synonyms:
+  - shopper bags
+  - saddle bags
+  - trapezoid bags
+  - barrel bags
+  - convertible bags
+  - bucket bags
+  - muff clutches & bags
+  - half-moon bags
+  - shoulder bags
+  - baguette handbags
+  - beach bags
+  - minaudieres
+  - clutch bags
+  - envelope clutches
+  - school bags
+  - satchel bags
+  - doctor bags
+  - fold over clutches
+  - hobo bags
+  - cross body bags
+- category_id: aa-5-5
+  synonyms:
+  - card cases
+  - travel wallets
+  - coin purses
+  - neck pouches
+  - wallets
+  - key cases
+  - wrist bags
+- category_id: aa-6
+  synonyms:
+  - necklaces
+  - earrings
+  - anklets
+  - body jewelry
+  - watch accessories
+  - smart watches
+  - charms & pendants
+  - watches
+  - brooches & lapel pins
+  - jewelry sets
+  - bracelets
+  - rings
+- category_id: aa-6-10
+  synonyms:
+  - watch winders
+  - watch bands
+  - watch stickers & decals
+- category_id: aa-7
+  synonyms:
+  - shoe covers
+  - gaiters
+  - boot liners
+  - shoe grips
+  - spurs
+  - shoelaces
+  - shoe inserts
+- category_id: aa-7-5
+  synonyms:
+  - arch supports
+  - heel cushions
+  - anti slip steps
+  - gel pads
+- category_id: aa-8
+  synonyms:
+  - athletic shoes
+  - sneakers
+  - baby & toddler shoes
+  - boots
+  - flats
+  - sandals
+  - heels
+  - slippers
+- category_id: aa-8-2
+  synonyms:
+  - baby & toddler athletic shoes
+  - first steps & crawlers
+  - baby & toddler boots
+  - baby & toddler sandals
+  - baby & toddler sneakers

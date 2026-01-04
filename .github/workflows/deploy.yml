@@ -1,0 +1,68 @@
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches: [ main ]  # Deploy on push to main branch
+  workflow_dispatch:  # Allow manual deployment from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'corretto'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build JAR with Gradle
+        run: ./gradlew :nexus-api:clean :nexus-api:bootJar -x test
+
+      - name: Get JAR name
+        id: jar-name
+        run: echo "jar=$(ls nexus-api/build/libs/nexus-api-*.jar | grep -v plain)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: neoxus-backend
+          environment_name: neoxus-production
+          version_label: ${{ github.sha }}
+          region: eu-north-1
+          deployment_package: ${{ steps.jar-name.outputs.jar }}
+          wait_for_deployment: true
+          wait_for_environment_recovery: 120
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Environment: neoxus-production"
+          echo "Version: ${{ github.sha }}"
+          echo "JAR: ${{ steps.jar-name.outputs.jar }}"

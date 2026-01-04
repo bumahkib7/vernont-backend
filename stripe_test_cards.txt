@@ -1,0 +1,38 @@
+
+  Stripe Test Cards
+
+  Use these test card numbers at checkout:
+
+  Successful Payments
+
+  | Card Number         | Description                 |
+  |---------------------|-----------------------------|
+  | 4242 4242 4242 4242 | Visa - succeeds             |
+  | 5555 5555 5555 4444 | Mastercard - succeeds       |
+  | 3782 822463 10005   | American Express - succeeds |
+
+  3D Secure / Authentication
+
+  | Card Number         | Description                       |
+  |---------------------|-----------------------------------|
+  | 4000 0025 0000 3155 | Requires 3D Secure authentication |
+  | 4000 0000 0000 3220 | 3D Secure 2 authentication        |
+
+  Declined Cards (for testing error handling)
+
+  | Card Number         | Description        |
+  |---------------------|--------------------|
+  | 4000 0000 0000 0002 | Card declined      |
+  | 4000 0000 0000 9995 | Insufficient funds |
+  | 4000 0000 0000 9987 | Lost card          |
+  | 4000 0000 0000 0069 | Expired card       |
+  | 4000 0000 0000 0127 | Incorrect CVC      |
+
+  For all test cards:
+
+  - Expiry: Any future date (e.g., 12/34)
+  - CVC: Any 3 digits (e.g., 123) or 4 digits for Amex
+  - ZIP: Any 5 digits (e.g., 12345)
+
+  ---
+  Now go to http://localhost:3000/checkout, fill in the information, and test the payment with 4242 4242 4242 4242!

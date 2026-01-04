@@ -1,0 +1,152 @@
+package com.vernont.workflow.repository
+
+import com.vernont.workflow.domain.WorkflowExecution
+import com.vernont.workflow.domain.WorkflowExecutionStatus
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
+import org.springframework.stereotype.Repository
+import java.time.Instant
+
+/**
+ * Repository for WorkflowExecution following nexus-domain patterns
+ */
+@Repository
+interface WorkflowExecutionRepository : JpaRepository<WorkflowExecution, String> {
+    
+    /**
+     * Find executions by workflow name
+     */
+    fun findByWorkflowNameOrderByCreatedAtDesc(
+        workflowName: String,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+    
+    /**
+     * Find executions by status
+     */
+    fun findByStatusOrderByCreatedAtDesc(
+        status: WorkflowExecutionStatus,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+
+    /**
+     * Find running executions that have exceeded their timeout.
+     *
+     * A workflow is timed out if:
+     *   created_at + timeout_seconds * 1s < :threshold
+     */
+    @Query(
+        value = """
+            SELECT *
+            FROM workflow_executions w
+            WHERE w.status = 'RUNNING'
+              AND w.timeout_seconds IS NOT NULL
+              AND (w.created_at + (w.timeout_seconds * INTERVAL '1 second')) < :threshold
+        """,
+        nativeQuery = true
+    )
+    fun findTimedOutExecutions(@Param("threshold") threshold: Instant): List<WorkflowExecution>
+
+
+    /**
+     * Find executions that can be retried
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.status = 'FAILED'
+        AND w.retryCount < w.maxRetries
+        AND w.createdAt > :since
+    """)
+    fun findRetryableExecutions(@Param("since") since: Instant): List<WorkflowExecution>
+    
+    /**
+     * Find executions by correlation ID (for distributed workflows)
+     */
+    fun findByCorrelationIdOrderByCreatedAtAsc(correlationId: String): List<WorkflowExecution>
+    
+    /**
+     * Find child executions
+     */
+    fun findByParentExecutionIdOrderByCreatedAtAsc(parentExecutionId: String): List<WorkflowExecution>
+    
+    /**
+     * Find executions by creator within time range
+     */
+    fun findByCreatedByAndCreatedAtBetweenOrderByCreatedAtDesc(
+        createdBy: String,
+        startTime: Instant,
+        endTime: Instant,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+    
+    /**
+     * Count executions by workflow name and status
+     */
+    fun countByWorkflowNameAndStatus(workflowName: String, status: WorkflowExecutionStatus): Long
+    
+    /**
+     * Find recent failed executions for monitoring
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.status = 'FAILED'
+        AND w.createdAt >= :since
+        ORDER BY w.createdAt DESC
+    """)
+    fun findRecentFailures(@Param("since") since: Instant, pageable: Pageable): Page<WorkflowExecution>
+    
+    /**
+     * Find long-running executions
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.status = 'RUNNING'
+        AND w.createdAt < :threshold
+        ORDER BY w.createdAt ASC
+    """)
+    fun findLongRunningExecutions(@Param("threshold") threshold: Instant): List<WorkflowExecution>
+    
+    /**
+     * Get execution statistics by workflow name
+     */
+    @Query("""
+        SELECT w.status as status, COUNT(w) as count
+        FROM WorkflowExecution w
+        WHERE w.workflowName = :workflowName
+        AND w.createdAt >= :since
+        GROUP BY w.status
+    """)
+    fun getExecutionStatsByWorkflow(
+        @Param("workflowName") workflowName: String,
+        @Param("since") since: Instant
+    ): List<WorkflowExecutionStats>
+    
+    /**
+     * Find executions needing cleanup (old completed executions)
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT')
+        AND w.completedAt < :threshold
+    """)
+    fun findExecutionsForCleanup(@Param("threshold") threshold: Instant): List<WorkflowExecution>
+    
+    /**
+     * Delete old executions (for cleanup)
+     */
+    fun deleteByCompletedAtBeforeAndStatusIn(
+        completedAt: Instant,
+        statuses: List<WorkflowExecutionStatus>
+    ): Long
+}
+
+/**
+ * Statistics projection
+ */
+interface WorkflowExecutionStats {
+    val status: WorkflowExecutionStatus
+    val count: Long
+}

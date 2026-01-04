@@ -1,0 +1,244 @@
+package com.nexuscommerce.infrastructure.email
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.sendgrid.SendGrid
+import com.sendgrid.helpers.mail.Email
+import com.sendgrid.helpers.mail.Mail
+import com.sendgrid.helpers.mail.PersonalizationIndex
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.stereotype.Service
+import java.io.IOException
+
+/**
+ * SendGrid implementation of the EmailService interface.
+ * Handles sending transactional and template-based emails via SendGrid API.
+ */
+@Service
+class SendGridEmailService(
+    @Value("\${sendgrid.api-key}")
+    private val sendGridApiKey: String,
+    @Value("\${sendgrid.from-email}")
+    private val fromEmail: String,
+    @Value("\${sendgrid.from-name:NexusCommerce}")
+    private val fromName: String,
+    private val objectMapper: ObjectMapper
+) : EmailService {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+    private val sendGrid = SendGrid(sendGridApiKey)
+
+    override suspend fun sendTransactionalEmail(
+        to: String,
+        subject: String,
+        htmlContent: String,
+        plainTextContent: String?
+    ) {
+        try {
+            val mail = Mail(
+                Email(fromEmail, fromName),
+                subject,
+                Email(to),
+                null
+            )
+
+            mail.setReplyToList(listOf(com.sendgrid.helpers.mail.ReplyToList(Email(fromEmail, fromName))))
+
+            val personalization = mail.getPersonalization(PersonalizationIndex.Index.ZERO.value)
+            personalization.addDynamicTemplateData("htmlContent", htmlContent)
+            if (plainTextContent != null) {
+                personalization.addDynamicTemplateData("plainTextContent", plainTextContent)
+            }
+
+            mail.setFrom(Email(fromEmail, fromName))
+            mail.setSubject(subject)
+
+            val response = sendGrid.api(com.sendgrid.helpers.mail.Request().apply {
+                method = com.sendgrid.helpers.mail.Method.POST
+                endpoint = "mail/send"
+                body = mail.build()
+            })
+
+            if (response.statusCode >= 400) {
+                logger.error(
+                    "SendGrid email send failed for recipient: $to, status: ${response.statusCode}, " +
+                    "body: ${response.body}"
+                )
+                throw EmailException(
+                    "Failed to send email to $to: Status ${response.statusCode}",
+                    IOException(response.body)
+                )
+            }
+
+            logger.info("Email sent successfully to: $to")
+
+        } catch (e: IOException) {
+            logger.error("IOException while sending email to $to", e)
+            throw EmailException("Failed to send email to $to", e)
+        } catch (e: Exception) {
+            logger.error("Unexpected error while sending email to $to", e)
+            throw EmailException("Unexpected error sending email to $to", e)
+        }
+    }
+
+    override suspend fun sendTransactionalEmailBatch(
+        recipients: List<String>,
+        subject: String,
+        htmlContent: String,
+        plainTextContent: String?
+    ) {
+        try {
+            val mail = Mail().apply {
+                setFrom(Email(fromEmail, fromName))
+                setSubject(subject)
+                setReplyToList(listOf(com.sendgrid.helpers.mail.ReplyToList(Email(fromEmail, fromName))))
+            }
+
+            recipients.forEach { recipient ->
+                val personalization = com.sendgrid.helpers.mail.Personalization().apply {
+                    addTo(Email(recipient))
+                    addDynamicTemplateData("htmlContent", htmlContent)
+                    if (plainTextContent != null) {
+                        addDynamicTemplateData("plainTextContent", plainTextContent)
+                    }
+                }
+                mail.addPersonalization(personalization)
+            }
+
+            val response = sendGrid.api(com.sendgrid.helpers.mail.Request().apply {
+                method = com.sendgrid.helpers.mail.Method.POST
+                endpoint = "mail/send"
+                body = mail.build()
+            })
+
+            if (response.statusCode >= 400) {
+                logger.error(
+                    "SendGrid batch email send failed for ${recipients.size} recipients, " +
+                    "status: ${response.statusCode}, body: ${response.body}"
+                )
+                throw EmailException(
+                    "Failed to send batch email to ${recipients.size} recipients: Status ${response.statusCode}",
+                    IOException(response.body)
+                )
+            }
+
+            logger.info("Batch email sent successfully to ${recipients.size} recipients")
+
+        } catch (e: IOException) {
+            logger.error("IOException while sending batch email", e)
+            throw EmailException("Failed to send batch email", e)
+        } catch (e: Exception) {
+            logger.error("Unexpected error while sending batch email", e)
+            throw EmailException("Unexpected error sending batch email", e)
+        }
+    }
+
+    override suspend fun sendTemplateEmail(
+        to: String,
+        templateId: String,
+        templateData: Map<String, Any>,
+        subject: String?
+    ) {
+        try {
+            val mail = Mail().apply {
+                setFrom(Email(fromEmail, fromName))
+                if (subject != null) {
+                    setSubject(subject)
+                }
+                setReplyToList(listOf(com.sendgrid.helpers.mail.ReplyToList(Email(fromEmail, fromName))))
+                setTemplateId(templateId)
+            }
+
+            val personalization = com.sendgrid.helpers.mail.Personalization().apply {
+                addTo(Email(to))
+                templateData.forEach { (key, value) ->
+                    addDynamicTemplateData(key, value)
+                }
+            }
+            mail.addPersonalization(personalization)
+
+            val response = sendGrid.api(com.sendgrid.helpers.mail.Request().apply {
+                method = com.sendgrid.helpers.mail.Method.POST
+                endpoint = "mail/send"
+                body = mail.build()
+            })
+
+            if (response.statusCode >= 400) {
+                logger.error(
+                    "SendGrid template email send failed for recipient: $to, template: $templateId, " +
+                    "status: ${response.statusCode}, body: ${response.body}"
+                )
+                throw EmailException(
+                    "Failed to send template email to $to: Status ${response.statusCode}",
+                    IOException(response.body)
+                )
+            }
+
+            logger.info("Template email sent successfully to: $to with template: $templateId")
+
+        } catch (e: IOException) {
+            logger.error("IOException while sending template email to $to", e)
+            throw EmailException("Failed to send template email to $to", e)
+        } catch (e: Exception) {
+            logger.error("Unexpected error while sending template email to $to", e)
+            throw EmailException("Unexpected error sending template email to $to", e)
+        }
+    }
+
+    override suspend fun sendTemplateEmailBatch(
+        recipients: List<String>,
+        templateId: String,
+        templateData: Map<String, Any>,
+        subject: String?
+    ) {
+        try {
+            val mail = Mail().apply {
+                setFrom(Email(fromEmail, fromName))
+                if (subject != null) {
+                    setSubject(subject)
+                }
+                setReplyToList(listOf(com.sendgrid.helpers.mail.ReplyToList(Email(fromEmail, fromName))))
+                setTemplateId(templateId)
+            }
+
+            recipients.forEach { recipient ->
+                val personalization = com.sendgrid.helpers.mail.Personalization().apply {
+                    addTo(Email(recipient))
+                    templateData.forEach { (key, value) ->
+                        addDynamicTemplateData(key, value)
+                    }
+                }
+                mail.addPersonalization(personalization)
+            }
+
+            val response = sendGrid.api(com.sendgrid.helpers.mail.Request().apply {
+                method = com.sendgrid.helpers.mail.Method.POST
+                endpoint = "mail/send"
+                body = mail.build()
+            })
+
+            if (response.statusCode >= 400) {
+                logger.error(
+                    "SendGrid batch template email send failed for ${recipients.size} recipients, " +
+                    "template: $templateId, status: ${response.statusCode}, body: ${response.body}"
+                )
+                throw EmailException(
+                    "Failed to send batch template email to ${recipients.size} recipients: Status ${response.statusCode}",
+                    IOException(response.body)
+                )
+            }
+
+            logger.info(
+                "Batch template email sent successfully to ${recipients.size} recipients " +
+                "with template: $templateId"
+            )
+
+        } catch (e: IOException) {
+            logger.error("IOException while sending batch template email", e)
+            throw EmailException("Failed to send batch template email", e)
+        } catch (e: Exception) {
+            logger.error("Unexpected error while sending batch template email", e)
+            throw EmailException("Unexpected error sending batch template email", e)
+        }
+    }
+}
