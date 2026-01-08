@@ -3,13 +3,6 @@ plugins {
     id("org.springframework.boot")
 }
 
-group = "com.vernont"
-version = "1.0.0"
-
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux:4.0.1")
     implementation("org.springframework.boot:spring-boot-starter-data-redis:4.0.1")
