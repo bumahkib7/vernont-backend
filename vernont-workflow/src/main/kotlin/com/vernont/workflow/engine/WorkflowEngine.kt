@@ -1,6 +1,7 @@
 package com.vernont.workflow.engine
 
 import com.vernont.workflow.domain.WorkflowExecution
+import com.vernont.workflow.events.WorkflowEventPublisher
 import com.vernont.workflow.service.WorkflowExecutionService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micrometer.core.instrument.MeterRegistry
@@ -36,9 +37,13 @@ class WorkflowContext {
     var executionId: String? = null
     var workflowName: String? = null
     var correlationId: String? = null
-    
+
+    // Event publisher for step-level events (injected by WorkflowEngine)
+    internal var eventPublisher: WorkflowEventPublisher? = null
+
     private val metadata = ConcurrentHashMap<String, Any>()
     private val executedSteps = mutableListOf<String>()
+    private var stepIndex = 0
 
     fun addMetadata(key: String, value: Any) {
         metadata[key] = value
@@ -46,11 +51,65 @@ class WorkflowContext {
 
     fun getMetadata(key: String): Any? = metadata[key]
 
+    /**
+     * Record a step execution and publish step events
+     */
     fun recordStep(stepName: String) {
         executedSteps.add(stepName)
     }
 
+    /**
+     * Record step start with event publishing
+     */
+    fun recordStepStart(stepName: String, input: Any?, totalSteps: Int = 0) {
+        stepIndex = executedSteps.size
+        eventPublisher?.publishStepStarted(
+            executionId = executionId ?: "",
+            workflowName = workflowName ?: "",
+            stepName = stepName,
+            stepIndex = stepIndex,
+            totalSteps = totalSteps,
+            input = input,
+            correlationId = correlationId
+        )
+    }
+
+    /**
+     * Record step completion with event publishing
+     */
+    fun recordStepComplete(stepName: String, output: Any?, durationMs: Long, totalSteps: Int = 0) {
+        executedSteps.add(stepName)
+        eventPublisher?.publishStepCompleted(
+            executionId = executionId ?: "",
+            workflowName = workflowName ?: "",
+            stepName = stepName,
+            stepIndex = stepIndex,
+            totalSteps = totalSteps,
+            output = output,
+            durationMs = durationMs,
+            correlationId = correlationId
+        )
+    }
+
+    /**
+     * Record step failure with event publishing
+     */
+    fun recordStepFailed(stepName: String, error: Throwable, durationMs: Long, totalSteps: Int = 0) {
+        eventPublisher?.publishStepFailed(
+            executionId = executionId ?: "",
+            workflowName = workflowName ?: "",
+            stepName = stepName,
+            stepIndex = stepIndex,
+            totalSteps = totalSteps,
+            error = error,
+            durationMs = durationMs,
+            correlationId = correlationId
+        )
+    }
+
     fun getExecutedSteps(): List<String> = executedSteps.toList()
+
+    fun getCurrentStepIndex(): Int = stepIndex
 }
 
 /**
@@ -96,6 +155,7 @@ class WorkflowEngine(
     private val workflowExecutionService: WorkflowExecutionService,
     private val redisTemplate: StringRedisTemplate,
     private val meterRegistry: MeterRegistry,
+    private val workflowEventPublisher: WorkflowEventPublisher,
     @Value("\${app.workflow.default-timeout-seconds:300000}")
     private val defaultTimeoutSeconds: Long,
     @Value("\${app.workflow.lock-timeout-seconds:60}")
@@ -185,16 +245,27 @@ class WorkflowEngine(
         context.executionId = executionId
         context.workflowName = workflow.name
         context.correlationId = options.correlationId
-        
-        logger.info { 
+        context.eventPublisher = workflowEventPublisher
+
+        logger.info {
             "Starting workflow: ${workflow.name} (execution: $executionId) " +
-            "with lockKey=$effectiveLockKey, correlationId=${options.correlationId}" 
+            "with lockKey=$effectiveLockKey, correlationId=${options.correlationId}"
         }
-        
+
         // Metrics
         val timer = Timer.start(meterRegistry)
+        val startTimeMs = System.currentTimeMillis()
         meterRegistry.counter("workflow.executions.started", "workflow", workflow.name).increment()
-        
+
+        // Publish workflow started event
+        workflowEventPublisher.publishWorkflowStarted(
+            executionId = executionId,
+            workflowName = workflow.name,
+            input = input,
+            correlationId = options.correlationId,
+            parentExecutionId = options.parentExecutionId
+        )
+
         return try {
             // Distributed locking for concurrent safety
             val acquired = redisTemplate.opsForValue().setIfAbsent(effectiveLockKey, executionId, lockTimeoutSeconds, TimeUnit.SECONDS)
@@ -212,42 +283,64 @@ class WorkflowEngine(
                 // Handle the result properly
                 when {
                     result.isSuccess() -> {
+                        val durationMs = System.currentTimeMillis() - startTimeMs
+
                         // Update execution record as completed
                         workflowExecutionService.completeExecution(executionId, result.getOrNull())
-                        
+
+                        // Publish workflow completed event
+                        workflowEventPublisher.publishWorkflowCompleted(
+                            executionId = executionId,
+                            workflowName = workflow.name,
+                            output = result.getOrNull(),
+                            durationMs = durationMs,
+                            correlationId = options.correlationId
+                        )
+
                         // Metrics for success
                         timer.stop(Timer.builder("workflow.execution.duration")
                             .tag("workflow", workflow.name)
                             .tag("status", "completed")
                             .register(meterRegistry))
                         meterRegistry.counter("workflow.executions.completed", "workflow", workflow.name).increment()
-                        
-                        logger.info { "Workflow completed successfully: ${workflow.name} (execution: $executionId)" }
+
+                        logger.info { "Workflow completed successfully: ${workflow.name} (execution: $executionId) in ${durationMs}ms" }
                         result
                     }
                     result.isFailure() -> {
+                        val durationMs = System.currentTimeMillis() - startTimeMs
+
                         // Handle WorkflowResult.Failure - this is a business logic failure, not an exception
                         val failure = result as WorkflowResult.Failure
                         workflowExecutionService.failExecution(executionId, failure.error)
-                        
+
+                        // Publish workflow failed event
+                        workflowEventPublisher.publishWorkflowFailed(
+                            executionId = executionId,
+                            workflowName = workflow.name,
+                            error = failure.error,
+                            durationMs = durationMs,
+                            correlationId = options.correlationId
+                        )
+
                         // Attempt compensation for business failures too
                         try {
                             workflow.compensate(context)
                             workflowExecutionService.compensateExecution(executionId)
                             logger.info { "Compensation completed for failed workflow: ${workflow.name} (execution: $executionId)" }
                         } catch (compensationError: Exception) {
-                            logger.error(compensationError) { 
-                                "Compensation failed for workflow: ${workflow.name} (execution: $executionId)" 
+                            logger.error(compensationError) {
+                                "Compensation failed for workflow: ${workflow.name} (execution: $executionId)"
                             }
                         }
-                        
+
                         // Metrics for business failure
                         timer.stop(Timer.builder("workflow.execution.duration")
                             .tag("workflow", workflow.name)
                             .tag("status", "failed")
                             .register(meterRegistry))
                         meterRegistry.counter("workflow.executions.failed", "workflow", workflow.name).increment()
-                        
+
                         logger.warn { "Workflow failed with business logic error: ${workflow.name} (execution: $executionId) - ${failure.error.message}" }
                         result
                     }
@@ -264,9 +357,19 @@ class WorkflowEngine(
             }
             
         } catch (e: TimeoutCancellationException) {
+            val durationMs = System.currentTimeMillis() - startTimeMs
             val timeoutError = WorkflowTimeoutException("Workflow execution timed out: $executionId")
             workflowExecutionService.failExecution(executionId, timeoutError)
-            
+
+            // Publish workflow failed event for timeout
+            workflowEventPublisher.publishWorkflowFailed(
+                executionId = executionId,
+                workflowName = workflow.name,
+                error = timeoutError,
+                durationMs = durationMs,
+                correlationId = options.correlationId
+            )
+
             // Attempt compensation on timeout (partial state may need cleanup)
             try {
                 workflow.compensate(context)
@@ -277,38 +380,48 @@ class WorkflowEngine(
                     "Compensation failed after timeout for workflow: ${workflow.name} (execution: $executionId)"
                 }
             }
-            
+
             timer.stop(Timer.builder("workflow.execution.duration")
                 .tag("workflow", workflow.name)
                 .tag("status", "timeout")
                 .register(meterRegistry))
             meterRegistry.counter("workflow.executions.timeout", "workflow", workflow.name).increment()
-            
+
             logger.error(timeoutError) { "Workflow timed out: ${workflow.name} (execution: $executionId)" }
             WorkflowResult.failure(timeoutError)
             
         } catch (e: Exception) {
+            val durationMs = System.currentTimeMillis() - startTimeMs
             logger.error(e) { "Workflow failed: ${workflow.name} (execution: $executionId)" }
             workflowExecutionService.failExecution(executionId, e)
-            
+
+            // Publish workflow failed event
+            workflowEventPublisher.publishWorkflowFailed(
+                executionId = executionId,
+                workflowName = workflow.name,
+                error = e,
+                durationMs = durationMs,
+                correlationId = options.correlationId
+            )
+
             // Attempt compensation
             try {
                 workflow.compensate(context)
                 workflowExecutionService.compensateExecution(executionId)
                 logger.info { "Compensation completed for workflow: ${workflow.name} (execution: $executionId)" }
             } catch (compensationError: Exception) {
-                logger.error(compensationError) { 
-                    "Compensation failed for workflow: ${workflow.name} (execution: $executionId)" 
+                logger.error(compensationError) {
+                    "Compensation failed for workflow: ${workflow.name} (execution: $executionId)"
                 }
             }
-            
+
             // Metrics
             timer.stop(Timer.builder("workflow.execution.duration")
                 .tag("workflow", workflow.name)
                 .tag("status", "failed")
                 .register(meterRegistry))
             meterRegistry.counter("workflow.executions.failed", "workflow", workflow.name).increment()
-            
+
             WorkflowResult.failure(e)
         }
     }
@@ -339,10 +452,57 @@ class WorkflowEngine(
         
         // Update retry count
         workflowExecutionService.retryExecution(executionId)
-        
+
         return executeWorkflow(workflow, input, WorkflowContext())
     }
-    
+
+    /**
+     * Retry a failed workflow execution (type-erased version for admin API)
+     * Returns the new execution ID
+     */
+    fun retryExecution(executionId: String): String {
+        val execution = workflowExecutionService.getExecution(executionId)
+
+        if (!execution.canRetry()) {
+            throw IllegalStateException("Execution $executionId cannot be retried")
+        }
+
+        val metadata = workflows[execution.workflowName]
+            ?: throw WorkflowNotFoundException("Workflow not found: ${execution.workflowName}")
+
+        // Run the retry in a new coroutine scope
+        val newExecutionId = runBlocking {
+            retryExecutionInternal(execution, metadata)
+        }
+
+        return newExecutionId
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <I : Any, O : Any> retryExecutionInternal(
+        execution: WorkflowExecution,
+        metadata: WorkflowMetadata<I, O>
+    ): String {
+        val workflow = metadata.workflow
+        val inputType = metadata.inputType
+
+        // Deserialize input
+        val input = workflowExecutionService.deserializeData(execution.inputData, inputType.java)
+            ?: throw IllegalArgumentException("Could not deserialize input for execution: ${execution.id}")
+
+        // Update retry count on original execution
+        workflowExecutionService.retryExecution(execution.id)
+
+        // Execute as a new workflow instance with new execution ID
+        val context = WorkflowContext().apply {
+            correlationId = execution.correlationId
+        }
+        executeWorkflow(workflow, input, context)
+
+        // Return the new execution ID from the context
+        return context.executionId ?: execution.id
+    }
+
     /**
      * Pause a running workflow execution
      */

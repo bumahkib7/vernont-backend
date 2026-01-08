@@ -106,6 +106,9 @@ class Discount : BaseEntity() {
                     PromotionType.PERCENTAGE -> DiscountType.PERCENTAGE
                     PromotionType.FIXED -> DiscountType.FIXED
                     PromotionType.FREE_SHIPPING -> DiscountType.FREE_SHIPPING
+                    else -> {
+                        throw IllegalArgumentException("Unsupported promotion type: ${promotion.type}")
+                    }
                 }
                 this.value = promotion.value
             }

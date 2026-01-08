@@ -41,7 +41,7 @@ data class StepResponse<T>(
 }
 
 /**
- * Helper to create workflow steps
+ * Helper to create workflow steps with automatic event publishing
  */
 fun <I, O> createStep(
     name: String,
@@ -53,8 +53,29 @@ fun <I, O> createStep(
 
         override suspend fun invoke(input: I, context: WorkflowContext): StepResponse<O> {
             logger.info { "Executing step: $name" }
-            context.recordStep(name)
-            return execute(input, context)
+            val startTime = System.currentTimeMillis()
+
+            // Publish step started event
+            context.recordStepStart(name, input)
+
+            return try {
+                val result = execute(input, context)
+                val durationMs = System.currentTimeMillis() - startTime
+
+                // Publish step completed event
+                context.recordStepComplete(name, result.data, durationMs)
+
+                logger.info { "Step completed: $name in ${durationMs}ms" }
+                result
+            } catch (e: Exception) {
+                val durationMs = System.currentTimeMillis() - startTime
+
+                // Publish step failed event
+                context.recordStepFailed(name, e, durationMs)
+
+                logger.error(e) { "Step failed: $name after ${durationMs}ms" }
+                throw e
+            }
         }
 
         override suspend fun compensate(input: I, context: WorkflowContext) {

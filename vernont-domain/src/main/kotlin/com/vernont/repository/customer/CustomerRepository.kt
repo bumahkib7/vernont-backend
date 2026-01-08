@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
+import java.time.Instant
 
 @Repository
 interface CustomerRepository : JpaRepository<Customer, String> {
@@ -24,6 +25,12 @@ interface CustomerRepository : JpaRepository<Customer, String> {
 
     @EntityGraph(value = "Customer.withGroups", type = EntityGraph.EntityGraphType.LOAD)
     fun findWithGroupsById(id: String): Customer?
+
+    @EntityGraph(value = "Customer.withGroups", type = EntityGraph.EntityGraphType.LOAD)
+    fun findWithGroupsByIdAndDeletedAtIsNull(id: String): Customer?
+
+    @EntityGraph(value = "Customer.full", type = EntityGraph.EntityGraphType.LOAD)
+    fun findWithFullDetailsByIdAndDeletedAtIsNull(id: String): Customer?
 
     fun findByEmail(email: String): Customer?
 
@@ -60,4 +67,10 @@ interface CustomerRepository : JpaRepository<Customer, String> {
 
     @Query("SELECT c FROM Customer c WHERE c.user.id = :userId AND c.deletedAt IS NULL")
     fun findByUserIdAndDeletedAtIsNull(@Param("userId") userId: String): Customer?
+
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.createdAt >= :since AND c.deletedAt IS NULL")
+    fun countByCreatedAtAfter(@Param("since") since: Instant): Long
+
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.createdAt >= :startDate AND c.createdAt < :endDate AND c.deletedAt IS NULL")
+    fun countByCreatedAtBetween(@Param("startDate") startDate: Instant, @Param("endDate") endDate: Instant): Long
 }

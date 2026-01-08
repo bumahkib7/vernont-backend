@@ -1,6 +1,10 @@
 package com.vernont.api.controller
 
+import com.vernont.domain.auth.InviteStatus
+import com.vernont.events.InternalUserInviteAcceptedEvent
 import com.vernont.infrastructure.config.Argon2PasswordEncoder
+import com.vernont.infrastructure.messaging.MessagingService
+import com.vernont.infrastructure.messaging.MessagingTopics
 import com.vernont.repository.auth.UserRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.jsonwebtoken.Jwts
@@ -11,6 +15,7 @@ import jakarta.validation.constraints.NotBlank
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -22,6 +27,7 @@ import java.util.*
 class ResetPasswordController(
     private val userRepository: UserRepository,
     private val passwordEncoder: Argon2PasswordEncoder,
+    private val messagingService: MessagingService,
     @Value("\${app.jwt.secret}") private val jwtSecret: String,
 ) {
     private val logger = KotlinLogging.logger {}
@@ -33,6 +39,7 @@ class ResetPasswordController(
     data class ResetPasswordResponse(val ok: Boolean)
 
     @PostMapping
+    @Transactional
     fun resetPassword(@RequestBody req: ResetPasswordRequest): ResponseEntity<Any> {
         return try {
             val secretKey = buildSecretKey(jwtSecret)
@@ -49,7 +56,35 @@ class ResetPasswordController(
                 ?: return bad("USER_NOT_FOUND", "No user found for token")
 
             user.passwordHash = passwordEncoder.encode(req.newPassword)
+
+            // If this is an invited user accepting their invite, mark as accepted
+            val wasInvited = user.inviteStatus == InviteStatus.PENDING
+            if (wasInvited) {
+                logger.info { "User ${user.email} accepting invite" }
+                user.acceptInvite()  // Sets status to ACCEPTED, sets inviteAcceptedAt
+                user.isActive = true
+                user.emailVerified = true
+            }
+
             userRepository.save(user)
+
+            // Publish event if user accepted an invite
+            if (wasInvited) {
+                try {
+                    val event = InternalUserInviteAcceptedEvent(
+                        userId = user.id,
+                        email = user.email
+                    )
+                    messagingService.publish(
+                        topic = MessagingTopics.ADMIN_EVENTS,
+                        key = user.id,
+                        event = event
+                    )
+                    logger.info { "Published InternalUserInviteAcceptedEvent for user ${user.id}" }
+                } catch (pubEx: Exception) {
+                    logger.warn(pubEx) { "Failed to publish InternalUserInviteAcceptedEvent: ${pubEx.message}" }
+                }
+            }
 
             ResponseEntity.ok(ResetPasswordResponse(true))
         } catch (e: WeakKeyException) {

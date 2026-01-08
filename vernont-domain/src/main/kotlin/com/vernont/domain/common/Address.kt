@@ -5,6 +5,10 @@ import jakarta.persistence.Column
 
 @Embeddable
 data class Address(
+    @Column(name = "first_name")
+    val firstName: String? = null,
+    @Column(name = "last_name")
+    val lastName: String? = null,
     @Column(name = "address_1", nullable = false)
     val address1: String,
     @Column(name = "address_2")

@@ -25,10 +25,46 @@ interface WorkflowExecutionRepository : JpaRepository<WorkflowExecution, String>
     ): Page<WorkflowExecution>
     
     /**
-     * Find executions by status
+     * Find executions by status (enum)
      */
     fun findByStatusOrderByCreatedAtDesc(
         status: WorkflowExecutionStatus,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+
+    /**
+     * Find executions by status (string) for API queries
+     */
+    @Query("SELECT w FROM WorkflowExecution w WHERE CAST(w.status AS string) = :status ORDER BY w.createdAt DESC")
+    fun findByStatusOrderByCreatedAtDesc(
+        @Param("status") status: String,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+
+    /**
+     * Find executions by workflow name and status
+     */
+    @Query("SELECT w FROM WorkflowExecution w WHERE w.workflowName = :workflowName AND CAST(w.status AS string) = :status ORDER BY w.createdAt DESC")
+    fun findByWorkflowNameAndStatusOrderByCreatedAtDesc(
+        @Param("workflowName") workflowName: String,
+        @Param("status") status: String,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+
+    /**
+     * Find executions created after a timestamp
+     */
+    fun findByCreatedAtAfterOrderByCreatedAtDesc(
+        createdAt: Instant,
+        pageable: Pageable
+    ): Page<WorkflowExecution>
+
+    /**
+     * Find executions with status in list (for active queries)
+     */
+    @Query("SELECT w FROM WorkflowExecution w WHERE CAST(w.status AS string) IN :statuses ORDER BY w.createdAt DESC")
+    fun findByStatusInOrderByCreatedAtDesc(
+        @Param("statuses") statuses: List<String>,
         pageable: Pageable
     ): Page<WorkflowExecution>
 
@@ -44,7 +80,7 @@ interface WorkflowExecutionRepository : JpaRepository<WorkflowExecution, String>
             FROM workflow_executions w
             WHERE w.status = 'RUNNING'
               AND w.timeout_seconds IS NOT NULL
-              AND (w.created_at + (w.timeout_seconds * INTERVAL '1 second')) < :threshold
+              AND (w.created_at + make_interval(secs => w.timeout_seconds)) < :threshold
         """,
         nativeQuery = true
     )

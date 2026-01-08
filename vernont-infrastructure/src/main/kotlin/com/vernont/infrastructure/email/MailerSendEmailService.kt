@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service
 @Service
 class MailerSendEmailService(
     @Value("\${app.mailersend.token:}") private val apiToken: String,
-    @Value("\${app.mail.from:}") private val fromEmail: String,
-    @Value("\${app.mail.from-name:Vernont}") private val fromName: String,
+    @Value("\${app.mailersend.from:}") private val fromEmail: String,
+    @Value("\${app.mailersend.from-name:Vernont}") private val fromName: String,
 ) : EmailService {
 
     private val logger = KotlinLogging.logger {}
@@ -56,13 +56,13 @@ class MailerSendEmailService(
         try {
             withContext(Dispatchers.IO) {
                 val response: MailerSendResponse = client().emails().send(email)
-                logger.info { "MailerSend dispatched messageId=${'$'}{response.messageId}" }
+                logger.info { "MailerSend dispatched messageId=${response.messageId}" }
             }
         } catch (e: MailerSendException) {
-            logger.error(e) { "MailerSend error: ${'$'}{e.message}" }
+            logger.error(e) { "MailerSend error: ${e.message}" }
             throw EmailException("Failed to send email via MailerSend", e)
         } catch (e: Exception) {
-            logger.error(e) { "MailerSend unexpected error: ${'$'}{e.message}" }
+            logger.error(e) { "MailerSend unexpected error: ${e.message}" }
             throw EmailException("Failed to send email via MailerSend", e)
         }
     }
@@ -97,7 +97,7 @@ class MailerSendEmailService(
         val body = (templateData["body"] as? String) ?: ""
         val buttonText = (templateData["buttonText"] as? String) ?: "Open"
         val buttonUrl = (templateData["buttonUrl"] as? String) ?: "#"
-        val footerText = (templateData["footer"] as? String) ?: "© ${'$'}brand"
+        val footerText = (templateData["footer"] as? String) ?: $$"© $brand"
         val logoUrl = (templateData["logoUrl"] as? String) ?: ""
 
         // Note: Web fonts are inconsistently supported in email clients. We include elegant fallbacks.
@@ -118,19 +118,19 @@ class MailerSendEmailService(
         val safeBtnText = esc(buttonText)
         val safeFooter = esc(footerText)
 
-        return """
+        return $$"""
 <!doctype html>
 <html lang=\"en\">
   <head>
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />
-    <title>${'$'}safeTitle</title>
+    <title>$safeTitle</title>
     <style>
       /* Base resets */
       body { margin:0; padding:0; background-color:#f6f6f6; color:#111111; }
       img { border:none; -ms-interpolation-mode:bicubic; max-width:100%; }
       table { border-collapse:separate; mso-table-lspace:0pt; mso-table-rspace:0pt; width:100%; }
-      table td { font-family:${'$'}bodyFont; font-size:14px; vertical-align:top; }
+      table td { font-family:$bodyFont; font-size:14px; vertical-align:top; }
 
       /* Container */
       .body { background-color:#f6f6f6; width:100%; }
@@ -139,16 +139,16 @@ class MailerSendEmailService(
 
       /* Header */
       .header { padding:24px; text-align:center; background:#ffffff; }
-      .brand { font-family:${'$'}headingFont; font-size:20px; letter-spacing:0.5px; }
+      .brand { font-family:$headingFont; font-size:20px; letter-spacing:0.5px; }
       .logo { height:28px; }
 
       /* Hero */
       .hero { padding:32px 32px 8px 32px; text-align:left; }
-      .h1 { font-family:${'$'}headingFont; font-weight:600; font-size:28px; line-height:1.25; margin:0; }
+      .h1 { font-family:$headingFont; font-weight:600; font-size:28px; line-height:1.25; margin:0; }
       .pre { display:none; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; }
 
       /* Body */
-      .main { padding:8px 32px 24px 32px; color:#111111; font-family:${'$'}bodyFont; font-size:15px; line-height:1.6; }
+      .main { padding:8px 32px 24px 32px; color:#111111; font-family:$bodyFont; font-size:15px; line-height:1.6; }
       .btn-wrap { padding:8px 32px 32px 32px; }
       .btn { display:inline-block; background:#111111; color:#ffffff !important; text-decoration:none; padding:12px 18px; border-radius:8px; font-weight:600; letter-spacing:0.2px; }
 
@@ -168,25 +168,25 @@ class MailerSendEmailService(
     </style>
   </head>
   <body>
-    <span class=\"pre\">${'$'}safePre</span>
+    <span class=\"pre\">$safePre</span>
     <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" class=\"body\">
       <tr>
         <td>&nbsp;</td>
         <td class=\"container\">
-          <div class=\"header\">${'$'}{if (logoUrl.isNotBlank()) "<img class=\\\"logo\\\" src=\\\"${'$'}logoUrl\\\" alt=\\\"${'$'}brand\\\" />" else "<div class=\\\"brand\\\">${'$'}brand</div>"}</div>
+          <div class=\"header\">${if (logoUrl.isNotBlank()) "<img class=\\\"logo\\\" src=\\\"$logoUrl\\\" alt=\\\"$brand\\\" />" else "<div class=\\\"brand\\\">$brand</div>"}</div>
           <div class=\"content\">
             <div class=\"hero\">
-              <h1 class=\"h1\">${'$'}safeHeading</h1>
+              <h1 class=\"h1\">$safeHeading</h1>
             </div>
             <div class=\"main\">
-              ${'$'}body
+              $body
             </div>
             <div class=\"btn-wrap\">
-              <a class=\"btn\" href=\"${'$'}buttonUrl\">${'$'}safeBtnText</a>
+              <a class=\"btn\" href=\"$buttonUrl\">$safeBtnText</a>
             </div>
           </div>
           <div class=\"footer\">
-            <div class=\"muted\">${'$'}safeFooter</div>
+            <div class=\"muted\">$safeFooter</div>
           </div>
         </td>
         <td>&nbsp;</td>

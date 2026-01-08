@@ -33,7 +33,7 @@ class SecurityConfig(
         )
         private val corsAllowedOrigins: List<String>,
         @Value(
-                "\${spring.security.cors.allowed-origin-patterns:https://*.vercel.app}"
+                "\${spring.security.cors.allowed-origin-patterns:https://*.vernont.com,https://vernont.com,https://*.vercel.app}"
         )
         private val corsAllowedOriginPatterns: List<String>
 ) {
@@ -217,7 +217,7 @@ class SecurityConfig(
                             .permitAll()
 
                             // Health checks and monitoring
-                            .requestMatchers("/actuator/health")
+                            .requestMatchers("/actuator/health", "/actuator/health/**")
                             .permitAll()
                             .requestMatchers("/actuator/info")
                             .permitAll()
@@ -231,7 +231,10 @@ class SecurityConfig(
                             .requestMatchers("/sitemap.xml", "/sitemap-*.xml")
                             .permitAll()
 
-                            // OpenAPI/Swagger UI
+                        // Stripe webhooks - must be public (verified by signature)
+                        .requestMatchers("/webhooks/**").permitAll()
+
+                        // OpenAPI/Swagger UI
                             .requestMatchers("/swagger-ui/**")
                             .permitAll()
                             .requestMatchers("/v3/api-docs/**")
@@ -296,7 +299,8 @@ class SecurityConfig(
                             // Rate-limited endpoints
                             .requestMatchers("/rate-limited/**")
                             .permitAll()
-
+                        .requestMatchers("/admin/products")
+                        .hasRole(Role.ADMIN)
                             // Default: require authentication for any other endpoint
                             .anyRequest()
                             .authenticated()

@@ -339,7 +339,7 @@ class CustomerService(
         eventPublisher.publish(
             CustomerRegistered(
                 aggregateId = saved.id,
-                email = saved.email!!,
+                email = saved.email,
                 firstName = saved.firstName ?: "",
                 lastName = saved.lastName ?: "",
                 phone = saved.phone

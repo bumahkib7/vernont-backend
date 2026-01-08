@@ -9,6 +9,11 @@ import com.vernont.domain.order.Order
 import com.vernont.domain.order.OrderStatus
 import com.vernont.events.*
 import com.vernont.application.order.OrderEventService
+import com.vernont.application.shipping.CreateLabelRequest
+import com.vernont.application.shipping.ShipEngineAddress
+import com.vernont.application.shipping.ShipEngineLabelResult
+import com.vernont.application.shipping.ShipEngineParcel
+import com.vernont.application.shipping.ShipEngineService
 import com.vernont.repository.fulfillment.FulfillmentProviderRepository
 import com.vernont.repository.fulfillment.FulfillmentRepository
 import com.vernont.repository.inventory.StockLocationRepository
@@ -59,7 +64,15 @@ data class ShipOrderInput(
     val carrier: String? = null,
     val trackingUrl: String? = null,
     val noNotification: Boolean = false,
-    val metadata: Map<String, Any>? = null
+    val metadata: Map<String, Any>? = null,
+    // ShipEngine integration fields
+    val useShipEngine: Boolean = false,
+    val carrierId: String? = null,
+    val serviceCode: String? = null,
+    val packageWeight: Double? = null,
+    val packageLength: Double? = null,
+    val packageWidth: Double? = null,
+    val packageHeight: Double? = null
 )
 
 /**
@@ -70,7 +83,13 @@ data class ShipOrderResponse(
     val fulfillmentId: String,
     val fulfillmentStatus: String,
     val trackingNumbers: List<String>,
-    val message: String
+    val message: String,
+    // ShipEngine integration fields
+    val labelUrls: List<String> = emptyList(),
+    val trackingUrls: List<String> = emptyList(),
+    val shipEngineLabelId: String? = null,
+    val carrier: String? = null,
+    val shippingCost: String? = null
 )
 
 /**
@@ -409,7 +428,8 @@ class ShipOrderWorkflow(
     private val fulfillmentProviderRepository: FulfillmentProviderRepository,
     private val stockLocationRepository: StockLocationRepository,
     private val eventPublisher: EventPublisher,
-    private val orderEventService: OrderEventService
+    private val orderEventService: OrderEventService,
+    private val shipEngineService: ShipEngineService
 ) : Workflow<ShipOrderInput, ShipOrderResponse> {
 
     override val name = WorkflowConstants.ShipOrder.NAME
@@ -528,36 +548,119 @@ class ShipOrderWorkflow(
                 }
             )
 
-            // Step 3: Add tracking information and ship fulfillment
+            // Step 3: Create ShipEngine label (optional)
+            val createShipEngineLabelStep = createStep<ShipOrderInput, ShipEngineLabelResult?>(
+                name = "create-shipengine-label",
+                execute = { inp, ctx ->
+                    // Skip if ShipEngine not requested or not available
+                    if (!inp.useShipEngine || !shipEngineService.isAvailable()) {
+                        if (inp.useShipEngine) {
+                            logger.warn { "ShipEngine requested but not configured, falling back to manual mode" }
+                            ctx.addMetadata("shipEngineWarning", "ShipEngine not configured, using manual mode")
+                        }
+                        return@createStep StepResponse.of<ShipEngineLabelResult?>(null)
+                    }
+
+                    val order = ctx.getMetadata("order") as Order
+
+                    try {
+                        // Build shipping address
+                        val shippingAddress = order.shippingAddress
+                            ?: throw IllegalStateException("Order has no shipping address")
+
+                        val toAddress = ShipEngineAddress(
+                            name = listOfNotNull(shippingAddress.firstName, shippingAddress.lastName)
+                                .joinToString(" ").ifBlank { "Customer" },
+                            street1 = shippingAddress.address1 ?: "",
+                            street2 = shippingAddress.address2,
+                            city = shippingAddress.city ?: "",
+                            stateProvince = shippingAddress.province,
+                            postalCode = shippingAddress.postalCode ?: "",
+                            countryCode = shippingAddress.countryCode ?: "GB",
+                            phone = shippingAddress.phone?.ifBlank { null } ?: "+1 555 555 5555",
+                            email = order.email
+                        )
+
+                        // Build parcel dimensions
+                        val parcel = ShipEngineParcel(
+                            length = inp.packageLength ?: 10.0,
+                            width = inp.packageWidth ?: 10.0,
+                            height = inp.packageHeight ?: 5.0,
+                            weight = inp.packageWeight ?: (16.0 * order.items.sumOf { it.quantity })
+                        )
+
+                        // Calculate customs info from order
+                        val totalQuantity = order.items.sumOf { it.quantity }
+                        val customsDescription = order.items.firstOrNull()?.title ?: "Merchandise"
+                        val customsValue = order.total?.toDouble() ?: 10.0
+
+                        val request = CreateLabelRequest(
+                            toAddress = toAddress,
+                            parcel = parcel,
+                            carrierId = inp.carrierId ?: "",
+                            serviceCode = inp.serviceCode ?: shipEngineService.getConfig().defaultServiceCode,
+                            customsDescription = customsDescription.take(50), // Limit to 50 chars
+                            customsQuantity = totalQuantity,
+                            customsValue = customsValue
+                        )
+
+                        val result = shipEngineService.createLabel(request)
+                        ctx.addMetadata("shipEngineResult", result)
+
+                        logger.info { "ShipEngine label created: ${result.labelId}, tracking: ${result.trackingNumber}" }
+                        StepResponse.of(result)
+
+                    } catch (e: Exception) {
+                        logger.error(e) { "ShipEngine label creation failed: ${e.message}" }
+                        // Don't fail silently - throw the error so the admin knows what went wrong
+                        throw IllegalStateException("ShipEngine label creation failed: ${e.message}", e)
+                    }
+                }
+            )
+
+            // Step 4: Add tracking information and ship fulfillment
             val shipFulfillmentStep = createStep<ShipOrderInput, Fulfillment>(
                 name = "ship-fulfillment",
                 execute = { inp, ctx ->
                     val fulfillment = ctx.getMetadata("fulfillment") as Fulfillment
+                    val shipEngineResult = ctx.getMetadata("shipEngineResult") as? ShipEngineLabelResult
 
                     logger.debug { "Adding tracking info and shipping fulfillment: ${fulfillment.id}" }
 
-                    // Add tracking number if provided
-                    if (!inp.trackingNumber.isNullOrBlank()) {
-                        fulfillment.addTrackingNumber(inp.trackingNumber)
+                    // Use ShipEngine tracking if available, otherwise use manual input
+                    val trackingNumber = shipEngineResult?.trackingNumber ?: inp.trackingNumber
+                    val trackingUrl = shipEngineResult?.trackingUrl ?: inp.trackingUrl
+                    val carrier = shipEngineResult?.carrier ?: inp.carrier
+
+                    // Add tracking number
+                    if (!trackingNumber.isNullOrBlank()) {
+                        fulfillment.addTrackingNumber(trackingNumber)
                     }
 
-                    // Add tracking URL if provided, or generate one based on carrier
-                    if (!inp.trackingUrl.isNullOrBlank()) {
-                        fulfillment.addTrackingUrl(inp.trackingUrl)
-                    } else if (!inp.trackingNumber.isNullOrBlank() && !inp.carrier.isNullOrBlank()) {
-                        // Generate tracking URL based on carrier
-                        val trackingUrl = generateTrackingUrl(inp.carrier, inp.trackingNumber)
-                        if (trackingUrl != null) {
-                            fulfillment.addTrackingUrl(trackingUrl)
+                    // Add tracking URL
+                    if (!trackingUrl.isNullOrBlank()) {
+                        fulfillment.addTrackingUrl(trackingUrl)
+                    } else if (!trackingNumber.isNullOrBlank() && !carrier.isNullOrBlank()) {
+                        val generatedUrl = generateTrackingUrl(carrier, trackingNumber)
+                        if (generatedUrl != null) {
+                            fulfillment.addTrackingUrl(generatedUrl)
                         }
                     }
 
-                    // Store carrier in data if provided
-                    if (!inp.carrier.isNullOrBlank()) {
-                        val currentData = fulfillment.data?.toMutableMap() ?: mutableMapOf()
-                        currentData["carrier"] = inp.carrier
-                        fulfillment.data = currentData
+                    // Store carrier and ShipEngine data
+                    val currentData = fulfillment.data?.toMutableMap() ?: mutableMapOf()
+                    if (!carrier.isNullOrBlank()) {
+                        currentData["carrier"] = carrier
                     }
+                    if (shipEngineResult != null) {
+                        currentData["shipengine_label_id"] = shipEngineResult.labelId
+                        currentData["shipengine_label_url"] = shipEngineResult.labelDownloadUrl
+                        shipEngineResult.labelDownloadPng?.let { currentData["shipengine_label_png_url"] = it }
+                        currentData["shipengine_carrier"] = shipEngineResult.carrier
+                        currentData["shipengine_service"] = shipEngineResult.serviceCode
+                        currentData["shipengine_cost"] = shipEngineResult.shipmentCost
+                    }
+                    fulfillment.data = currentData
 
                     // Mark as shipped
                     if (!fulfillment.isShipped()) {
@@ -572,8 +675,8 @@ class ShipOrderWorkflow(
                     orderEventService.recordShipped(
                         orderId = order.id,
                         fulfillmentId = savedFulfillment.id,
-                        trackingNumber = inp.trackingNumber,
-                        carrier = inp.carrier,
+                        trackingNumber = trackingNumber,
+                        carrier = carrier,
                         trackingUrl = savedFulfillment.getTrackingUrlsList().firstOrNull(),
                         shippedBy = inp.metadata?.get("shipped_by") as? String
                     )
@@ -651,9 +754,15 @@ class ShipOrderWorkflow(
             // Execute workflow steps
             val order = loadOrderStep.invoke(input.orderId, context).data
             getFulfillmentStep.invoke(order, context)
+            createShipEngineLabelStep.invoke(input, context)
             val shippedFulfillment = shipFulfillmentStep.invoke(input, context).data
             val updatedOrder = updateOrderStep.invoke(order, context).data
             emitEventStep.invoke(shippedFulfillment, context)
+
+            // Get ShipEngine result for response
+            val shipEngineResult = context.getMetadata("shipEngineResult") as? ShipEngineLabelResult
+            val shipEngineWarning = context.getMetadata("shipEngineWarning") as? String
+            val shipEngineError = context.getMetadata("shipEngineError") as? String
 
             // Build response
             val response = ShipOrderResponse(
@@ -661,7 +770,12 @@ class ShipOrderWorkflow(
                 fulfillmentId = shippedFulfillment.id,
                 fulfillmentStatus = updatedOrder.fulfillmentStatus.name.lowercase(),
                 trackingNumbers = shippedFulfillment.getTrackingNumbersList(),
-                message = "Order shipped successfully"
+                message = buildMessage(shipEngineResult, shipEngineWarning, shipEngineError),
+                labelUrls = listOfNotNull(shipEngineResult?.labelDownloadUrl, shipEngineResult?.labelDownloadPng),
+                trackingUrls = shippedFulfillment.getTrackingUrlsList(),
+                shipEngineLabelId = shipEngineResult?.labelId,
+                carrier = shipEngineResult?.carrier ?: input.carrier,
+                shippingCost = shipEngineResult?.let { "${it.shipmentCost} ${it.currency}" }
             )
 
             logger.info { "Ship order workflow completed. Order: ${order.id}" }
@@ -687,6 +801,22 @@ class ShipOrderWorkflow(
             "hermes", "evri" -> "https://www.evri.com/track/parcel/$trackingNumber"
             "yodel" -> "https://www.yodel.co.uk/tracking/$trackingNumber"
             else -> null
+        }
+    }
+
+    /**
+     * Build response message based on ShipEngine result
+     */
+    private fun buildMessage(
+        shipEngineResult: ShipEngineLabelResult?,
+        warning: String?,
+        error: String?
+    ): String {
+        return when {
+            shipEngineResult != null -> "Order shipped with ShipEngine label generated"
+            warning != null -> "Order shipped. Warning: $warning"
+            error != null -> "Order shipped manually. ShipEngine failed: $error"
+            else -> "Order shipped successfully"
         }
     }
 }

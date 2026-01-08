@@ -1,6 +1,8 @@
 package com.vernont.domain.product
 
+import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonManagedReference
+import com.fasterxml.jackson.annotation.JsonValue
 import com.vernont.domain.common.BaseEntity
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
@@ -224,7 +226,16 @@ enum class ProductStatus {
     DRAFT,
     PROPOSED,
     PUBLISHED,
-    REJECTED
+    REJECTED;
+
+    @JsonValue
+    fun toJson(): String = name.lowercase()
+
+    companion object {
+        @JsonCreator
+        @JvmStatic
+        fun fromJson(value: String): ProductStatus = valueOf(value.uppercase())
+    }
 }
 
 

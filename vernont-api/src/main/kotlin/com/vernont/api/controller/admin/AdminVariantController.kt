@@ -1,6 +1,7 @@
 package com.vernont.api.controller.admin
 
 import com.vernont.application.product.ProductService
+import com.vernont.domain.product.dto.CreateProductVariantRequest
 import com.vernont.domain.product.dto.ProductVariantResponse
 import com.vernont.domain.product.dto.UpdateProductVariantRequest
 import com.vernont.repository.product.ProductVariantRepository
@@ -66,6 +67,18 @@ class AdminVariantController(
         val variant = productVariantRepository.findByIdAndDeletedAtIsNull(id)
             ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(ProductVariantResponse.from(variant))
+    }
+
+    @PostMapping
+    fun createVariant(
+        @RequestParam productId: String,
+        @RequestBody request: CreateProductVariantRequest
+    ): ResponseEntity<ProductVariantResponse> {
+        val product = productService.addVariant(productId, request)
+        val createdVariant = product.variants.lastOrNull()
+            ?: return ResponseEntity.badRequest().build()
+        variantLogger.info { "Created variant ${createdVariant.id} for product $productId" }
+        return ResponseEntity.ok(createdVariant)
     }
 
     @PutMapping("/{id}")

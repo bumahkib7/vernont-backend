@@ -4,6 +4,8 @@ import com.vernont.domain.order.FulfillmentStatus
 import com.vernont.domain.order.Order
 import com.vernont.domain.order.OrderStatus
 import com.vernont.domain.order.PaymentStatus
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
@@ -59,6 +61,10 @@ interface OrderRepository : JpaRepository<Order, String> {
     @EntityGraph(value = "Order.summary", type = EntityGraph.EntityGraphType.LOAD)
     fun findAllByCustomerIdAndDeletedAtIsNull(customerId: String): List<Order>
 
+    @EntityGraph(value = "Order.summary", type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT o FROM Order o WHERE o.customerId = :customerId AND o.deletedAt IS NULL ORDER BY o.createdAt DESC")
+    fun findByCustomerIdOrderByCreatedAtDesc(@Param("customerId") customerId: String, pageable: Pageable): Page<Order>
+
     /**
      * @deprecated Use findByEmailAndDeletedAtIsNull instead to respect soft delete
      */
@@ -71,6 +77,10 @@ interface OrderRepository : JpaRepository<Order, String> {
     fun findByCartId(cartId: String): Order?
 
     fun findByCartIdAndDeletedAtIsNull(cartId: String): Order?
+
+    fun findByPaymentIntentId(paymentIntentId: String): Order?
+
+    fun findByPaymentIntentIdAndDeletedAtIsNull(paymentIntentId: String): Order?
 
     /**
      * @deprecated Use findByStatusAndDeletedAtIsNull instead to respect soft delete

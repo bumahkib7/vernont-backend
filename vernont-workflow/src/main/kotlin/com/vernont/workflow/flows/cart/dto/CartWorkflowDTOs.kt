@@ -26,11 +26,13 @@ data class CartDto(
     val taxTotal: BigDecimal,
     val shippingTotal: BigDecimal,
     val discountTotal: BigDecimal,
+    val giftCardCode: String? = null,
+    val giftCardTotal: BigDecimal = BigDecimal.ZERO,
     val items: List<CartLineItemDto>,
     val itemCount: Int,
     val createdAt: Instant,
     val updatedAt: Instant,
-    
+
     // Additional cart metadata
     val type: String = "default", // default, quote, draft_order, etc.
     val completedAt: Instant? = null,
@@ -51,6 +53,8 @@ data class CartDto(
                     taxTotal = cart.tax,
                     shippingTotal = cart.shipping,
                     discountTotal = cart.discount,
+                    giftCardCode = cart.giftCardCode,
+                    giftCardTotal = cart.giftCardTotal,
                     items = cart.items.filter { it.deletedAt == null }
                         .map { CartLineItemDto.from(it) },
                     itemCount = cart.items.filter { it.deletedAt == null }.size,

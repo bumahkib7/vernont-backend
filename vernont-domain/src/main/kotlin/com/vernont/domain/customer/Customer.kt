@@ -4,7 +4,8 @@ import com.vernont.domain.auth.User
 import com.vernont.domain.common.BaseEntity
 import jakarta.persistence.*
 import jakarta.validation.constraints.Email
-import jakarta.validation.constraints.NotBlank
+import java.math.BigDecimal
+import java.time.Instant
 
 /**
  * Customer - Represents a customer who can place orders
@@ -29,7 +30,10 @@ import jakarta.validation.constraints.NotBlank
         Index(name = "idx_customer_user_id", columnList = "user_id", unique = true),
         Index(name = "idx_customer_phone", columnList = "phone"),
         Index(name = "idx_customer_has_account", columnList = "has_account"),
-        Index(name = "idx_customer_deleted_at", columnList = "deleted_at")
+        Index(name = "idx_customer_deleted_at", columnList = "deleted_at"),
+        Index(name = "idx_customer_tier", columnList = "tier"),
+        Index(name = "idx_customer_status", columnList = "status"),
+        Index(name = "idx_customer_total_spent", columnList = "total_spent")
     ]
 )
 @NamedEntityGraph(
@@ -115,6 +119,73 @@ class Customer : BaseEntity() {
         inverseJoinColumns = [JoinColumn(name = "customer_group_id")]
     )
     var groups: MutableSet<CustomerGroup> = mutableSetOf()
+
+    // ==========================================================================
+    // Tier and Status Fields
+    // ==========================================================================
+
+    /**
+     * Customer loyalty tier based on total spend
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    var tier: CustomerTier = CustomerTier.BRONZE
+
+    /**
+     * If true, tier was manually set and won't auto-upgrade
+     */
+    @Column(nullable = false)
+    var tierOverride: Boolean = false
+
+    /**
+     * Cached total amount spent (in cents for precision)
+     * Updated when orders are completed
+     */
+    @Column(nullable = false, precision = 19, scale = 2)
+    var totalSpent: BigDecimal = BigDecimal.ZERO
+
+    /**
+     * Total number of completed orders
+     */
+    @Column(nullable = false)
+    var orderCount: Int = 0
+
+    /**
+     * Account status (ACTIVE, SUSPENDED, BANNED)
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    var status: CustomerStatus = CustomerStatus.ACTIVE
+
+    /**
+     * When the account was suspended
+     */
+    @Column
+    var suspendedAt: Instant? = null
+
+    /**
+     * Reason for suspension
+     */
+    @Column(columnDefinition = "TEXT")
+    var suspendedReason: String? = null
+
+    /**
+     * Last login timestamp
+     */
+    @Column
+    var lastLoginAt: Instant? = null
+
+    /**
+     * Last order timestamp
+     */
+    @Column
+    var lastOrderAt: Instant? = null
+
+    /**
+     * Internal notes about this customer (admin only)
+     */
+    @Column(columnDefinition = "TEXT")
+    var internalNotes: String? = null
 
     fun getFullName(): String {
         return when {
@@ -213,4 +284,92 @@ class Customer : BaseEntity() {
     }
 
     fun hasAccountCreated(): Boolean = hasAccount
+
+    // ==========================================================================
+    // Status Management
+    // ==========================================================================
+
+    /**
+     * Suspend the customer account
+     */
+    fun suspend(reason: String) {
+        this.status = CustomerStatus.SUSPENDED
+        this.suspendedAt = Instant.now()
+        this.suspendedReason = reason
+    }
+
+    /**
+     * Activate/reactivate the customer account
+     */
+    fun activate() {
+        this.status = CustomerStatus.ACTIVE
+        this.suspendedAt = null
+        this.suspendedReason = null
+    }
+
+    /**
+     * Ban the customer account
+     */
+    fun ban(reason: String) {
+        this.status = CustomerStatus.BANNED
+        this.suspendedAt = Instant.now()
+        this.suspendedReason = reason
+    }
+
+    /**
+     * Check if customer can place orders
+     */
+    fun canPlaceOrders(): Boolean = status.canOrder
+
+    // ==========================================================================
+    // Tier Management
+    // ==========================================================================
+
+    /**
+     * Update total spent and potentially upgrade tier
+     * Call this when an order is completed
+     */
+    fun recordOrderCompleted(orderTotal: BigDecimal) {
+        this.totalSpent = this.totalSpent.add(orderTotal)
+        this.orderCount++
+        this.lastOrderAt = Instant.now()
+
+        // Auto-upgrade tier if not manually overridden
+        if (!tierOverride) {
+            val newTier = CustomerTier.forSpend(totalSpent)
+            if (newTier.ordinal > tier.ordinal) {
+                tier = newTier
+            }
+        }
+    }
+
+    /**
+     * Manually set tier (with override flag)
+     */
+    fun setTierManually(newTier: CustomerTier) {
+        this.tier = newTier
+        this.tierOverride = true
+    }
+
+    /**
+     * Clear tier override, allowing auto-tier based on spend
+     */
+    fun clearTierOverride() {
+        this.tierOverride = false
+        this.tier = CustomerTier.forSpend(totalSpent)
+    }
+
+    /**
+     * Get the spend needed to reach the next tier
+     */
+    fun getSpendToNextTier(): BigDecimal? {
+        return CustomerTier.spendToNextTier(totalSpent)
+    }
+
+    /**
+     * Record customer login
+     */
+    fun recordLogin() {
+        this.lastLoginAt = Instant.now()
+    }
 }

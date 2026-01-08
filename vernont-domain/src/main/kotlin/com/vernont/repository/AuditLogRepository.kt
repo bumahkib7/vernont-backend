@@ -168,4 +168,29 @@ interface AuditLogRepository : JpaRepository<AuditLog, Long> {
         @Param("since") since: Instant,
         pageable: Pageable
     ): Page<AuditLog>
+
+    /**
+     * Find business events (CREATE, UPDATE, DELETE on business entities)
+     * Excludes READ, LOGIN, LOGOUT, LOGIN_FAILED, PERMISSION_DENIED
+     */
+    @Query("""
+        SELECT a FROM AuditLog a
+        WHERE a.action IN ('CREATE', 'UPDATE', 'DELETE')
+        ORDER BY a.timestamp DESC
+    """)
+    fun findBusinessEvents(pageable: Pageable): Page<AuditLog>
+
+    /**
+     * Find business events since a specific timestamp (for polling)
+     */
+    @Query("""
+        SELECT a FROM AuditLog a
+        WHERE a.action IN ('CREATE', 'UPDATE', 'DELETE')
+        AND a.timestamp > :since
+        ORDER BY a.timestamp DESC
+    """)
+    fun findBusinessEventsSince(
+        @Param("since") since: Instant,
+        pageable: Pageable
+    ): Page<AuditLog>
 }

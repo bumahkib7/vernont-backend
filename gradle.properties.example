@@ -1,0 +1,32 @@
+# Gradle build optimization
+org.gradle.parallel=true
+org.gradle.caching=true
+org.gradle.daemon=true
+org.gradle.configureondemand=true
+
+# JVM optimization
+org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError
+
+# Kotlin compilation optimization
+kotlin.incremental=true
+kotlin.incremental.usePreciseJavaTracking=true
+kotlin.caching.enabled=true
+kotlin.parallel.tasks.in.project=true
+
+# Kotlin compiler daemon
+kotlin.compiler.execution.strategy=daemon
+
+# ===========================================
+# AWS CODEARTIFACT CONFIGURATION
+# ===========================================
+
+# Your AWS account ID (12 digits)
+aws.account=123456789012
+
+# AWS region where CodeArtifact is hosted
+aws.region=us-east-1
+
+# Auth token - DO NOT commit this! Generate with:
+# aws codeartifact get-authorization-token --domain vernont --query authorizationToken --output text
+# Token expires after 12 hours by default
+codeartifact.token=YOUR_TOKEN_HERE

@@ -155,7 +155,7 @@ class InternalAuthController(
                                 )
                 }
 
-                // Check if user has admin-related role
+                // Check if a user has an admin-related role
                 val hasAdminRole =
                         user.roles.any {
                                 it.name in
@@ -522,6 +522,84 @@ class InternalAuthController(
                                         mapOf(
                                                 "error" to "ME_FAILED",
                                                 "message" to "Failed to retrieve user information."
+                                        )
+                                )
+                }
+        }
+
+        data class WsTokenResponse(val token: String)
+
+        @Operation(
+                summary = "Get WebSocket Token",
+                description = "Get a short-lived token for WebSocket authentication"
+        )
+        @ApiResponses(
+                value =
+                        [
+                                ApiResponse(
+                                        responseCode = "200",
+                                        description = "WebSocket token generated"
+                                ),
+                                ApiResponse(
+                                        responseCode = "401",
+                                        description = "Not authenticated"
+                                )]
+        )
+        @PostMapping("/ws-token")
+        fun getWsToken(): ResponseEntity<Any> {
+                try {
+                        val authentication = SecurityContextHolder.getContext().authentication
+
+                        if (authentication == null ||
+                                !authentication.isAuthenticated ||
+                                "anonymousUser" == authentication.principal
+                        ) {
+                                logger.warn { "WS token request failed - no authenticated user" }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "UNAUTHENTICATED",
+                                                        "message" to "No authenticated user found."
+                                                )
+                                        )
+                        }
+
+                    val userId =
+                                when (val principal = authentication.principal) {
+                                        is com.vernont.domain.auth.UserContext ->
+                                                principal.userId
+
+                                        else -> authentication.name
+                                }
+
+                        val user =
+                                userRepository.findByIdWithRoles(userId)
+                                        ?: userRepository.findByEmailWithRoles(authentication.name)
+
+                        if (user == null || !user.isActive) {
+                                logger.warn { "WS token request failed - user not found: $userId" }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "USER_NOT_FOUND",
+                                                        "message" to "User not found or account deactivated"
+                                                )
+                                        )
+                        }
+
+                        // Generate a short-lived access token for WebSocket
+                        val wsToken = jwtTokenProvider.generateAccessToken(user, null)
+
+                        logger.debug { "WS token generated for user: ${user.id}" }
+
+                        return ResponseEntity.ok(WsTokenResponse(token = wsToken))
+                } catch (e: Exception) {
+                        logger.error(e) { "WS token generation failed" }
+                        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .body(
+                                        mapOf(
+                                                "error" to "WS_TOKEN_FAILED",
+                                                "message" to "Failed to generate WebSocket token."
                                         )
                                 )
                 }

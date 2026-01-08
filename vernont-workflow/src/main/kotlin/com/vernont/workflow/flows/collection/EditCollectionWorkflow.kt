@@ -16,17 +16,6 @@ import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-data class EditCollectionInput(
-    val id: String,
-    val title: String? = null,
-    val handle: String? = null,
-    val metadata: Map<String, Any>? = null
-)
-
-data class EditCollectionOutput(
-    val collection: ProductCollection
-)
-
 @Component
 @WorkflowTypes(
     input = EditCollectionInput::class,
@@ -60,7 +49,7 @@ class EditCollectionWorkflow(
             publishEvent(updatedCollection, context)
 
             logger.info { "Collection updated successfully: ${updatedCollection.id}" }
-            return WorkflowResult.success(EditCollectionOutput(updatedCollection))
+            return WorkflowResult.success(EditCollectionOutput(CollectionDto.from(updatedCollection)))
         } catch (e: Exception) {
             logger.error(e) { "Collection edit workflow failed: ${e.message}" }
             return WorkflowResult.failure(e)

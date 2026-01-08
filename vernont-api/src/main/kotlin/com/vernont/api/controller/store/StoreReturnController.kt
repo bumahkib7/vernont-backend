@@ -126,20 +126,16 @@ class StoreReturnController(
         val context = userContext ?: getCurrentUserContext()
             ?: return ResponseEntity.status(401).build()
 
-        if (context.customerId == null && context.email == null) {
-            return ResponseEntity.status(403).build()
-        }
-
         // Find returns by customer ID or email
         val returns = if (context.customerId != null) {
             returnRepository.findAllByCustomerIdOrEmailAndDeletedAtIsNull(
                 context.customerId!!,
-                context.email ?: ""
+                context.email
             )
         } else {
             returnRepository.findAllByCustomerIdOrEmailAndDeletedAtIsNull(
                 "",
-                context.email ?: ""
+                context.email
             )
         }
 
@@ -221,7 +217,7 @@ class StoreReturnController(
         val input = CancelReturnInput(
             returnId = id,
             customerId = context.customerId,
-            canceledBy = context.email ?: context.customerId
+            canceledBy = context.email
         )
 
         val correlationId = requestId ?: UUID.randomUUID().toString()

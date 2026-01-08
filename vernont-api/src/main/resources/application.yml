@@ -28,7 +28,9 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: ${JPA_HIBERNATE_DDL_AUTO:update}
+      # Use 'none' - Flyway manages schema migrations, not Hibernate
+      # Set to 'validate' only for debugging schema mismatches
+      ddl-auto: ${JPA_HIBERNATE_DDL_AUTO:none}
     show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
@@ -54,7 +56,9 @@ spring:
     enabled: ${FLYWAY_ENABLED:true}
     baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
     validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:true}
+    validate-migration-naming: true
     location: ${FLYWAY_LOCATION:classpath:/db/migration}
+    out-of-order: false
 
   data:
     redis:
@@ -134,12 +138,15 @@ server:
     mime-types: ${SERVER_COMPRESSION_MIME_TYPES:application/json,application/xml,text/html,text/xml,text/plain}
 
 # AWS S3 / MinIO Configuration
+# For local dev: uses MinIO at localhost:9000
+# For prod: set AWS_S3_ENDPOINT to empty and provide real AWS credentials
 aws:
   s3:
     bucket-name: ${AWS_S3_BUCKET:vernont}
     region: ${AWS_REGION:us-east-1}
     url-expiration-hours: ${AWS_S3_URL_EXPIRATION_HOURS:24}
-    endpoint-url: ${AWS_S3_ENDPOINT:}
+    endpoint-url: ${AWS_S3_ENDPOINT:http://localhost:9000}
+    presign-enabled: ${AWS_S3_PRESIGN_ENABLED:false}
   credentials:
     access-key: ${AWS_ACCESS_KEY:minioadmin}
     secret-key: ${AWS_SECRET_KEY:minioadmin}
@@ -202,10 +209,11 @@ app:
       roles:
         - ADMIN
 
-  mail:
-    enabled: ${MAIL_ENABLED:false}
-    from: ${MAIL_FROM:noreply@vernont.com}
-    from-name: ${MAIL_FROM_NAME:Vernont}
+  mailersend:
+    enabled: ${MAIL_ENABLED:true}
+    from: ${MAIL_FROM:info@vernont.com}
+    from-name: ${MAIL_FROM_NAME:info Information}
+    token: ${NEXUS_MAILERSEND_TOKEN:mlsn.edb3fa894c4e8f5149468f031505a410c220a0e1efaf14624b2dc7f1e8531e04}
 
   admin-url: ${ADMIN_URL:http://localhost:3000}
 
@@ -235,8 +243,30 @@ auth:
 stripe:
   secret-key: ${STRIPE_SECRET_KEY:}
   publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
-  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
   enabled: ${STRIPE_ENABLED:true}
+
+# ShipEngine Shipping Configuration
+# API Docs: https://www.shipengine.com/docs/
+shipengine:
+  enabled: ${SHIPENGINE_ENABLED:true}
+  api-key: ${SHIPENGINE_API_KEY:}
+  sandbox-api-key: ${SHIPENGINE_SANDBOX_API_KEY:TEST_CK9b3idl5rEBh01WO8oh0eikQH8R2GIRpFIHAtiUgAY}
+  use-sandbox: ${SHIPENGINE_USE_SANDBOX:true}
+  default-carrier-id: ${SHIPENGINE_DEFAULT_CARRIER_ID:se-358070}
+  default-service-code: ${SHIPENGINE_DEFAULT_SERVICE_CODE:ups_worldwide_expedited}
+  label-format: ${SHIPENGINE_LABEL_FORMAT:pdf}
+  # NOTE: Sandbox carriers are US-based. For production UK shipping, set env vars to your UK warehouse.
+  from-address:
+    name: ${SHIPENGINE_FROM_NAME:Your Store}
+    company: ${SHIPENGINE_FROM_COMPANY:}
+    street1: ${SHIPENGINE_FROM_STREET1:525 S Winchester Blvd}
+    street2: ${SHIPENGINE_FROM_STREET2:}
+    city: ${SHIPENGINE_FROM_CITY:San Jose}
+    state-province: ${SHIPENGINE_FROM_STATE:CA}
+    postal-code: ${SHIPENGINE_FROM_POSTAL_CODE:95128}
+    country-code: ${SHIPENGINE_FROM_COUNTRY:US}
+    phone: ${SHIPENGINE_FROM_PHONE:+1 555 555 5555}
 
 logging:
   level:

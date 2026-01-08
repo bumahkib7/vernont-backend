@@ -41,19 +41,19 @@ class HibernateAuditListenerRegistrar(
             postInsertEventListenerProvider.ifAvailable { listener ->
                 registry.appendListeners(EventType.POST_INSERT, listener)
                 logger.info { "Registered CustomPostInsertEventListener with Hibernate." }
-            } ?: logger.warn { "CustomPostInsertEventListener not found in ApplicationContext." }
+            }
 
             // Register Post-Update Event Listener
             postUpdateEventListenerProvider.ifAvailable { listener ->
                 registry.appendListeners(EventType.POST_UPDATE, listener)
                 logger.info { "Registered CustomPostUpdateEventListener with Hibernate." }
-            } ?: logger.warn { "CustomPostUpdateEventListener not found in ApplicationContext." }
+            }
 
             // Register Post-Delete Event Listener
             postDeleteEventListenerProvider.ifAvailable { listener ->
                 registry.appendListeners(EventType.POST_DELETE, listener)
                 logger.info { "Registered CustomPostDeleteEventListener with Hibernate." }
-            } ?: logger.warn { "CustomPostDeleteEventListener not found in ApplicationContext." }
+            }
         } catch (e: Exception) {
             logger.error(e) { "Failed to register Hibernate audit listeners: ${e.message}" }
             // Don't rethrow - allow application to start even if audit listeners fail to register

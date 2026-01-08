@@ -88,7 +88,8 @@ class OrderAddress : BaseEntity() {
 
         fun fromCommonAddress(commonAddress: com.vernont.domain.common.Address): OrderAddress {
             return OrderAddress().apply {
-                // Assuming commonAddress doesn't have firstName, lastName, company
+                firstName = commonAddress.firstName
+                lastName = commonAddress.lastName
                 phone = commonAddress.phone
                 address1 = commonAddress.address1
                 address2 = commonAddress.address2

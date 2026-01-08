@@ -2,8 +2,11 @@ package com.vernont.repository.promotion
 
 import com.vernont.domain.promotion.Promotion
 import com.vernont.domain.promotion.PromotionType
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
@@ -75,4 +78,42 @@ interface PromotionRepository : JpaRepository<Promotion, String> {
 
     @Query("SELECT p FROM Promotion p WHERE LOWER(p.code) LIKE LOWER(CONCAT('%', :searchTerm, '%')) AND p.deletedAt IS NULL")
     fun searchByCode(@Param("searchTerm") searchTerm: String): List<Promotion>
+
+    /**
+     * Find promotion by code with pessimistic lock for applying discounts
+     * Prevents race conditions during concurrent promo code applications
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Promotion p WHERE p.code = :code AND p.deletedAt IS NULL")
+    fun findByCodeForApplication(@Param("code") code: String): Promotion?
+
+    /**
+     * Atomically increment usage count - prevents race conditions
+     * Returns number of rows updated (1 if successful, 0 if limit reached)
+     */
+    @Modifying
+    @Query("""
+        UPDATE Promotion p
+        SET p.usageCount = p.usageCount + 1,
+            p.updatedAt = CURRENT_TIMESTAMP
+        WHERE p.id = :promotionId
+        AND p.deletedAt IS NULL
+        AND p.isActive = true
+        AND p.isDisabled = false
+        AND (p.usageLimit IS NULL OR p.usageCount < p.usageLimit)
+    """)
+    fun atomicIncrementUsage(@Param("promotionId") promotionId: String): Int
+
+    /**
+     * Atomically decrement usage count (for refunds/cancellations)
+     */
+    @Modifying
+    @Query("""
+        UPDATE Promotion p
+        SET p.usageCount = CASE WHEN p.usageCount > 0 THEN p.usageCount - 1 ELSE 0 END,
+            p.updatedAt = CURRENT_TIMESTAMP
+        WHERE p.id = :promotionId
+        AND p.deletedAt IS NULL
+    """)
+    fun atomicDecrementUsage(@Param("promotionId") promotionId: String): Int
 }

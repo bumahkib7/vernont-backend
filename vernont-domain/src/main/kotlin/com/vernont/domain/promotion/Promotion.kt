@@ -34,9 +34,15 @@ import java.time.Instant
 )
 class Promotion : BaseEntity() {
 
+    @Column
+    var name: String? = null
+
     @NotBlank
     @Column(nullable = false, unique = true)
     var code: String = ""
+
+    @Column(columnDefinition = "TEXT")
+    var description: String? = null
 
     @Column(name = "is_active", nullable = false)
     var isActive: Boolean = false
@@ -56,12 +62,37 @@ class Promotion : BaseEntity() {
     @Column(name = "usage_count", nullable = false)
     var usageCount: Int = 0
 
+    @Column(name = "customer_usage_limit")
+    var customerUsageLimit: Int = 1
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     var type: PromotionType = PromotionType.PERCENTAGE
 
     @Column(nullable = false)
     var value: Double = 0.0
+
+    @Column(name = "minimum_amount")
+    var minimumAmount: java.math.BigDecimal? = null
+
+    @Column(name = "maximum_discount")
+    var maximumDiscount: java.math.BigDecimal? = null
+
+    @Column(name = "is_stackable", nullable = false)
+    var isStackable: Boolean = false
+
+    @Column(nullable = false)
+    var priority: Int = 0
+
+    // BUY_X_GET_Y fields
+    @Column(name = "buy_quantity")
+    var buyQuantity: Int? = null
+
+    @Column(name = "get_quantity")
+    var getQuantity: Int? = null
+
+    @Column(name = "get_discount_value")
+    var getDiscountValue: Double? = null
 
     @Column(columnDefinition = "TEXT")
     var regions: String? = null
@@ -147,5 +178,6 @@ class Promotion : BaseEntity() {
 enum class PromotionType {
     PERCENTAGE,
     FIXED,
-    FREE_SHIPPING
+    FREE_SHIPPING,
+    BUY_X_GET_Y
 }

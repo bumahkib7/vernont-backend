@@ -6,6 +6,20 @@ import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 
 /**
+ * Invitation status for internal users
+ */
+enum class InviteStatus {
+    /** User was created directly (not via invite) */
+    NONE,
+    /** Invitation sent, waiting for user to accept */
+    PENDING,
+    /** User accepted invite and set password */
+    ACCEPTED,
+    /** Invitation expired or was cancelled */
+    EXPIRED
+}
+
+/**
  * User - Authentication and authorization entity
  *
  * Represents a user account for:
@@ -61,6 +75,16 @@ class User : BaseEntity() {
     @Column
     var lastLoginAt: java.time.Instant? = null
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    var inviteStatus: InviteStatus = InviteStatus.NONE
+
+    @Column
+    var invitedAt: java.time.Instant? = null
+
+    @Column
+    var inviteAcceptedAt: java.time.Instant? = null
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "user_role",
@@ -104,5 +128,19 @@ class User : BaseEntity() {
 
     fun updateLastLogin() {
         this.lastLoginAt = java.time.Instant.now()
+    }
+
+    fun markAsInvited() {
+        this.inviteStatus = InviteStatus.PENDING
+        this.invitedAt = java.time.Instant.now()
+    }
+
+    fun acceptInvite() {
+        this.inviteStatus = InviteStatus.ACCEPTED
+        this.inviteAcceptedAt = java.time.Instant.now()
+    }
+
+    fun expireInvite() {
+        this.inviteStatus = InviteStatus.EXPIRED
     }
 }

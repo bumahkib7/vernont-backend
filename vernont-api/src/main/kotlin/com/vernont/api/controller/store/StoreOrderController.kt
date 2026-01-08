@@ -186,7 +186,7 @@ class StoreOrderController(
         val input = CancelOrderInput(
             orderId = id,
             canceledBy = order.email, // guest email
-            reason = body?.reason
+            reason = body.reason
             // initiatedByRole = "GUEST"
         )
 

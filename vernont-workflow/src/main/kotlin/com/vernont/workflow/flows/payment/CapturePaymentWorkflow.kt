@@ -311,7 +311,6 @@ class CapturePaymentWorkflow(
             logger.debug { "Stripe capture request: $stripeRequest" }
 
             // Actual Stripe API call structure ready (needs HTTP client + API key)
-            val stripeApiKey = System.getenv("STRIPE_SECRET_KEY") ?: "sk_test_placeholder"
             val captureId = "ch_${System.currentTimeMillis()}"
 
             return PaymentCaptureResult(

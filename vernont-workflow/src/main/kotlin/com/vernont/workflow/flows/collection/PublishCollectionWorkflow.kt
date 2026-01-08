@@ -16,14 +16,6 @@ import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
 
-data class PublishCollectionInput(
-    val id: String
-)
-
-data class PublishCollectionOutput(
-    val collection: ProductCollection
-)
-
 @Component
 @WorkflowTypes(
     input = PublishCollectionInput::class,
@@ -57,7 +49,7 @@ class PublishCollectionWorkflow(
             publishEvent(published, context)
 
             logger.info { "Collection published successfully: ${published.id}" }
-            WorkflowResult.success(PublishCollectionOutput(published))
+            WorkflowResult.success(PublishCollectionOutput(CollectionDto.from(published)))
         } catch (e: Exception) {
             logger.error(e) { "Publish collection workflow failed: ${e.message}" }
             WorkflowResult.failure(e)

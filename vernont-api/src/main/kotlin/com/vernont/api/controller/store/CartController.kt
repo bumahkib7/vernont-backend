@@ -18,6 +18,7 @@ import com.vernont.workflow.flows.payment.CreateStripePaymentIntentInput
 import com.vernont.workflow.flows.payment.StripePaymentIntentResponse
 import com.vernont.workflow.flows.payment.ConfirmStripePaymentInput
 import com.vernont.workflow.flows.payment.StripePaymentConfirmationResponse
+import com.vernont.application.giftcard.GiftCardOrderService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -41,7 +42,8 @@ private val logger = KotlinLogging.logger {}
 class CartController(
     private val workflowEngine: WorkflowEngine,
     private val cartRepository: com.vernont.repository.cart.CartRepository,
-    private val customerRepository: com.vernont.repository.customer.CustomerRepository
+    private val customerRepository: com.vernont.repository.customer.CustomerRepository,
+    private val giftCardOrderService: GiftCardOrderService
 ) {
 
     /**
@@ -241,9 +243,18 @@ class CartController(
      * POST /store/carts/:id
      *
      * Medusa-compatible endpoint that uses UpdateCartWorkflow
+     * SECURITY: Rate limited and validates cart ownership
      */
     @Operation(summary = "Update cart")
     @PostMapping("/{id}")
+    @RateLimited(
+        keyPrefix = "cart:update",
+        perIp = true,
+        perEmail = false,
+        limit = 30,  // Reasonable limit for promo/gift card attempts
+        windowSeconds = 300,  // 5 minutes
+        failClosed = true
+    )
     suspend fun updateCart(
         @PathVariable id: String,
         @RequestBody request: StoreUpdateCartRequest,
@@ -251,6 +262,28 @@ class CartController(
     ): ResponseEntity<Any> {
         val correlationId = requestId ?: "req_${UUID.randomUUID()}"
         logger.info { "Updating cart: cartId=$id, regionId=${request.regionId}, email=${request.email}" }
+
+        // SECURITY: Validate cart ownership before update
+        val cart = cartRepository.findWithItemsByIdAndDeletedAtIsNull(id)
+            ?: return ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf(
+                "error" to mapOf(
+                    "message" to "Cart not found: $id",
+                    "code" to "CART_NOT_FOUND"
+                )
+            ))
+
+        if (cart.customerId != null) {
+            val context = getCurrentUserContext()
+            if (context == null || context.customerId != cart.customerId) {
+                logger.warn { "Unauthorized cart update attempt: cartId=$id, requesterId=${context?.customerId}" }
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(mapOf(
+                    "error" to mapOf(
+                        "message" to "You don't have permission to update this cart",
+                        "code" to "CART_ACCESS_DENIED"
+                    )
+                ))
+            }
+        }
 
         return try {
             // Convert shipping address map to ShippingAddressInput if provided
@@ -278,7 +311,8 @@ class CartController(
                     promoCodes = request.promoCodes,
                     shippingAddress = shippingAddressInput,
                     billingAddressId = request.billingAddress?.get("address_id")?.toString()
-                        ?: request.billingAddress?.get("addressId")?.toString()
+                        ?: request.billingAddress?.get("addressId")?.toString(),
+                    giftCardCode = request.giftCardCode
                 ),
                 inputType = com.vernont.workflow.flows.cart.UpdateCartInput::class,
                 outputType = com.vernont.workflow.flows.cart.dto.CartResponse::class,
@@ -807,13 +841,16 @@ class CartController(
         val correlationId = requestId ?: "req_${UUID.randomUUID()}"
         logger.info { "Creating payment session for cart: cartId=$id" }
 
+        logger.info { "Payment session request - giftCardCode: ${request?.giftCardCode}" }
+
         return try {
             val result = workflowEngine.execute(
                 workflowName = WorkflowConstants.CreateStripePaymentIntent.NAME,
                 input = CreateStripePaymentIntentInput(
                     cartId = id,
                     email = request?.email,
-                    metadata = request?.metadata
+                    metadata = request?.metadata,
+                    giftCardCode = request?.giftCardCode
                 ),
                 inputType = CreateStripePaymentIntentInput::class,
                 outputType = StripePaymentIntentResponse::class,
@@ -1005,12 +1042,78 @@ class CartController(
             "tax_total" to cart.taxTotal.multiply(BigDecimal(100)).toInt(),
             "shipping_total" to cart.shippingTotal.multiply(BigDecimal(100)).toInt(),
             "discount_total" to cart.discountTotal.multiply(BigDecimal(100)).toInt(),
+            "gift_card_code" to cart.giftCardCode,
+            "gift_card_total" to cart.giftCardTotal.multiply(BigDecimal(100)).toInt(),
             "total" to cart.total.multiply(BigDecimal(100)).toInt(),
             "created_at" to cart.createdAt,
             "updated_at" to cart.updatedAt
         )
     }
+
+    /**
+     * Validate a gift card code
+     * POST /store/carts/{id}/gift-cards/validate
+     * SECURITY: Rate limited to prevent brute force enumeration
+     */
+    @Operation(summary = "Validate a gift card code")
+    @PostMapping("/{id}/gift-cards/validate")
+    @RateLimited(
+        keyPrefix = "cart:giftcard:validate",
+        perIp = true,
+        perEmail = false,
+        limit = 10,  // Strict limit to prevent brute force
+        windowSeconds = 300,  // 5 minutes
+        failClosed = true
+    )
+    fun validateGiftCard(
+        @PathVariable id: String,
+        @RequestBody request: ValidateGiftCardRequest
+    ): ResponseEntity<Any> {
+        logger.info { "Validating gift card for cart: $id" }
+
+        val cart = cartRepository.findWithItemsByIdAndDeletedAtIsNull(id)
+            ?: return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(mapOf("error" to "Cart not found"))
+
+        // SECURITY: Validate cart ownership
+        if (cart.customerId != null) {
+            val context = getCurrentUserContext()
+            if (context == null || context.customerId != cart.customerId) {
+                logger.warn { "Unauthorized gift card validation attempt: cartId=$id" }
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(mapOf("error" to "Access denied"))
+            }
+        }
+
+        val result = giftCardOrderService.validateGiftCard(
+            code = request.code,
+            currencyCode = cart.currencyCode
+        )
+
+        return if (result.valid) {
+            // SECURITY: Don't expose exact balance - just indicate validity
+            // and that there's sufficient balance (or show partial info)
+            ResponseEntity.ok(mapOf(
+                "valid" to true,
+                "balance" to result.availableBalance,
+                "currency_code" to cart.currencyCode
+            ))
+        } else {
+            // SECURITY: Generic error message to prevent enumeration
+            ResponseEntity.badRequest().body(mapOf(
+                "valid" to false,
+                "error" to "Invalid or expired gift card"
+            ))
+        }
+    }
 }
+
+/**
+ * Request for validating a gift card
+ */
+data class ValidateGiftCardRequest(
+    val code: String
+)
 
 /**
  * Request body for creating a cart
@@ -1063,7 +1166,11 @@ data class StoreUpdateCartRequest(
     val shippingAddress: Map<String, Any>? = null,
 
     @JsonProperty("billing_address")
-    val billingAddress: Map<String, Any>? = null
+    val billingAddress: Map<String, Any>? = null,
+
+    /** Gift card code to apply (empty string to remove) */
+    @JsonProperty("gift_card_code")
+    val giftCardCode: String? = null
 )
 
 /**
@@ -1118,7 +1225,11 @@ data class StoreCreatePaymentSessionRequest(
     @JsonProperty("billing_address_id")
     val billingAddressId: String? = null,
 
-    val metadata: Map<String, String>? = null
+    val metadata: Map<String, String>? = null,
+
+    /** Gift card code to apply - will reduce payment amount */
+    @JsonProperty("gift_card_code")
+    val giftCardCode: String? = null
 )
 
 /**

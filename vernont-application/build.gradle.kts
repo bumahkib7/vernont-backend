@@ -12,7 +12,6 @@ dependencies {
     // Spring Boot
     implementation("org.springframework.boot:spring-boot-starter:4.0.1")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa:4.0.1")
-    implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch:4.0.1") // Re-enabled
     implementation("org.springframework.boot:spring-boot-starter-websocket:4.0.1")
     implementation("org.springframework:spring-tx:7.0.0")
 
@@ -27,15 +26,6 @@ dependencies {
     implementation("io.github.resilience4j:resilience4j-circuitbreaker:2.2.0")
     implementation("io.github.resilience4j:resilience4j-kotlin:2.2.0")
 
-    // Elasticsearch client for compatibility with Spring Boot 4.0.1 - Re-enabled
-    implementation("co.elastic.clients:elasticsearch-java:9.2.2") {
-        exclude(group = "commons-logging", module = "commons-logging")
-    }
-    implementation("co.elastic.clients:elasticsearch-rest5-client:9.2.2")
-    // Elasticsearch REST client - Required for the Java API client
-    implementation("org.elasticsearch.client:elasticsearch-rest-client:9.2.2") {
-        exclude(group = "commons-logging", module = "commons-logging")
-    }
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 
     // Validation

@@ -1,7 +1,9 @@
 package com.vernont.workflow.flows.payment
 
+import com.vernont.application.order.OrderEventService
 import com.vernont.application.payment.StripeService
 import com.vernont.domain.order.Order
+import com.vernont.domain.order.OrderAddress
 import com.vernont.domain.order.OrderLineItem
 import com.vernont.domain.order.OrderStatus
 import com.vernont.domain.order.PaymentStatus
@@ -74,7 +76,8 @@ class ConfirmStripePaymentWorkflow(
     private val orderRepository: OrderRepository,
     private val paymentRepository: PaymentRepository,
     private val paymentProviderRepository: PaymentProviderRepository,
-    private val stripeService: StripeService
+    private val stripeService: StripeService,
+    private val orderEventService: OrderEventService
 ) : Workflow<ConfirmStripePaymentInput, StripePaymentConfirmationResponse> {
 
     override val name = WorkflowConstants.ConfirmStripePayment.NAME
@@ -162,6 +165,26 @@ class ConfirmStripePaymentWorkflow(
                     order.regionId = cart.regionId
                     order.status = OrderStatus.PENDING
                     order.paymentStatus = PaymentStatus.CAPTURED
+
+                    // Copy shipping address from cart (embedded Address -> OrderAddress entity)
+                    cart.shippingAddress?.let { addr ->
+                        order.shippingAddress = OrderAddress().apply {
+                            firstName = addr.firstName
+                            lastName = addr.lastName
+                            phone = addr.phone
+                            address1 = addr.address1
+                            address2 = addr.address2
+                            city = addr.city
+                            province = addr.province
+                            postalCode = addr.postalCode
+                            countryCode = addr.countryCode
+                        }
+                        logger.debug { "Copied shipping address to order" }
+                    }
+
+                    // Copy shipping method ID
+                    order.shippingMethodId = cart.shippingMethodId
+                    logger.debug { "Copied shipping method ID: ${cart.shippingMethodId}" }
 
                     // Copy line items
                     cart.items.filter { it.deletedAt == null }.forEach { cartItem ->
@@ -277,8 +300,25 @@ class ConfirmStripePaymentWorkflow(
             val cart = loadCartStep.invoke(input, context).data
             verifyPaymentStep.invoke(input.paymentIntentId, context)
             val order = createOrderStep.invoke(cart, context).data
-            createPaymentRecordStep.invoke(order, context)
+            val payment = createPaymentRecordStep.invoke(order, context).data
             completeCartStep.invoke(input, context)
+
+            // Record order events
+            orderEventService.recordOrderPlaced(
+                orderId = order.id,
+                email = order.email,
+                total = order.total,
+                currencyCode = order.currencyCode,
+                itemCount = order.items.size
+            )
+
+            orderEventService.recordPaymentCaptured(
+                orderId = order.id,
+                paymentId = payment.id,
+                amount = order.total,
+                currencyCode = order.currencyCode,
+                provider = "stripe"
+            )
 
             // Build response
             val response = StripePaymentConfirmationResponse(

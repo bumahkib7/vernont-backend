@@ -66,6 +66,12 @@ data class CreateProductOptionRequest(
     val position: Int = 0
 )
 
+data class UpdateProductOptionRequest(
+    val title: String? = null,
+    val values: List<String>? = null,
+    val position: Int? = null
+)
+
 data class CreateProductVariantRequest(
     @field:NotBlank
     val title: String,
@@ -91,7 +97,9 @@ data class UpdateProductVariantRequest(
     val weight: String? = null,
     val length: String? = null,
     val height: String? = null,
-    val width: String? = null
+    val width: String? = null,
+    @field:Valid
+    val prices: List<CreateProductVariantPriceRequest>? = null
 )
 
 data class CreateProductVariantPriceRequest(
@@ -112,6 +120,20 @@ data class CreateProductImageRequest(
     val position: Int = 0,
     val width: Int? = null,
     val height: Int? = null
+)
+
+data class UpdateProductImageRequest(
+    val altText: String? = null,
+    val position: Int? = null
+)
+
+data class ReorderImagesRequest(
+    val imageIds: List<String>
+)
+
+data class SetThumbnailRequest(
+    val imageId: String? = null,
+    val url: String? = null
 )
 
 /**
@@ -184,7 +206,7 @@ data class ProductResponse(
                     .map { it.value },
                 categories = product.categories
                     .filter { it.deletedAt == null }
-                    .map { it.name },
+                    .map { it.id },  // Return IDs for editing, not names
                 createdAt = product.createdAt,
                 updatedAt = product.updatedAt
             )

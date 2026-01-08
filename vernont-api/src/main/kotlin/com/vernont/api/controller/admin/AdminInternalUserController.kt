@@ -29,10 +29,19 @@ class AdminInternalUserController(
     ])
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
-    fun getAllInternalUsers(): ResponseEntity<List<InternalUserDto>> {
+    fun getAllInternalUsers(
+        @RequestParam(defaultValue = "100") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int
+    ): ResponseEntity<InternalUsersResponse> {
         logger.info { "Admin request to get all internal users" }
         val users = internalUserService.getAllInternalUsers()
-        return ResponseEntity.ok(users.toInternalUserDtos())
+        val userDtos = users.toInternalUserDtos()
+        return ResponseEntity.ok(InternalUsersResponse(
+            users = userDtos,
+            count = userDtos.size,
+            offset = offset,
+            limit = limit
+        ))
     }
 
     @Operation(summary = "Get user by ID", description = "Retrieves a single internal user by ID")
@@ -110,22 +119,61 @@ class AdminInternalUserController(
         }
     }
 
-    @Operation(summary = "Delete internal user", description = "Soft deletes an internal user")
+    @Operation(summary = "Archive internal user", description = "Soft deletes (archives) an internal user. User can be restored later.")
     @ApiResponses(value = [
-        ApiResponse(responseCode = "204", description = "User deleted successfully"),
+        ApiResponse(responseCode = "204", description = "User archived successfully"),
         ApiResponse(responseCode = "404", description = "User not found"),
         ApiResponse(responseCode = "403", description = "Access denied")
     ])
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    fun deleteInternalUser(@PathVariable id: String): ResponseEntity<Unit> {
-        logger.info { "Admin request to delete user: $id" }
+    fun archiveInternalUser(@PathVariable id: String): ResponseEntity<Unit> {
+        logger.info { "Admin request to archive user: $id" }
         return try {
-            internalUserService.deleteInternalUser(id)
+            internalUserService.archiveInternalUser(id)
             ResponseEntity.noContent().build()
         } catch (e: IllegalArgumentException) {
-            logger.warn { "Failed to delete user $id: ${e.message}" }
+            logger.warn { "Failed to archive user $id: ${e.message}" }
             ResponseEntity.notFound().build()
+        }
+    }
+
+    @Operation(summary = "Permanently delete internal user", description = "PERMANENTLY deletes an internal user and all associated data. THIS CANNOT BE UNDONE.")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "204", description = "User permanently deleted"),
+        ApiResponse(responseCode = "404", description = "User not found"),
+        ApiResponse(responseCode = "403", description = "Access denied")
+    ])
+    @DeleteMapping("/{id}/permanent")
+    @PreAuthorize("hasRole('ADMIN')")
+    fun hardDeleteInternalUser(@PathVariable id: String): ResponseEntity<Unit> {
+        logger.warn { "Admin request to PERMANENTLY delete user: $id" }
+        return try {
+            internalUserService.hardDeleteInternalUser(id)
+            ResponseEntity.noContent().build()
+        } catch (e: IllegalArgumentException) {
+            logger.warn { "Failed to permanently delete user $id: ${e.message}" }
+            ResponseEntity.notFound().build()
+        }
+    }
+
+    @Operation(summary = "Restore archived user", description = "Restores a previously archived (soft-deleted) internal user")
+    @ApiResponses(value = [
+        ApiResponse(responseCode = "200", description = "User restored successfully"),
+        ApiResponse(responseCode = "400", description = "User is not archived"),
+        ApiResponse(responseCode = "404", description = "User not found"),
+        ApiResponse(responseCode = "403", description = "Access denied")
+    ])
+    @PostMapping("/{id}/restore")
+    @PreAuthorize("hasRole('ADMIN')")
+    fun restoreInternalUser(@PathVariable id: String): ResponseEntity<InternalUserDto> {
+        logger.info { "Admin request to restore user: $id" }
+        return try {
+            val user = internalUserService.restoreInternalUser(id)
+            ResponseEntity.ok(user.toInternalUserDto())
+        } catch (e: IllegalArgumentException) {
+            logger.warn { "Failed to restore user $id: ${e.message}" }
+            ResponseEntity.badRequest().build()
         }
     }
 }

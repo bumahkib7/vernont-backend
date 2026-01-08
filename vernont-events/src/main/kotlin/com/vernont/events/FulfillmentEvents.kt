@@ -8,12 +8,23 @@ import java.time.Instant
  */
 
 /**
+ * Item included in a fulfillment
+ */
+data class FulfillmentItemData(
+    val sku: String,
+    val quantity: Int,
+    val title: String? = null,
+    val lineItemId: String? = null
+)
+
+/**
  * Fired when a new fulfillment is created.
  *
  * @property orderId ID of the associated order
  * @property locationId ID of the fulfillment location
  * @property providerId ID of the fulfillment provider (optional)
  * @property status Current fulfillment status
+ * @property items Items being fulfilled (for inventory decrement)
  */
 data class FulfillmentCreated(
     override val aggregateId: String,
@@ -21,6 +32,7 @@ data class FulfillmentCreated(
     val locationId: String,
     val providerId: String? = null,
     val status: String,
+    val items: List<FulfillmentItemData> = emptyList(),
     override val eventId: String = java.util.UUID.randomUUID().toString(),
     override val occurredAt: Instant = Instant.now(),
     override val version: Int = 1

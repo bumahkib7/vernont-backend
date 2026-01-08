@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.WorkflowTypes
 import com.vernont.repository.store.SalesChannelRepository
+import com.vernont.application.inventory.SkuGeneratorService
 
 
 private val logger = KotlinLogging.logger {}
@@ -66,7 +67,8 @@ class CreateProductWorkflow(
     private val inventoryLevelRepository: InventoryLevelRepository,
     private val stockLocationRepository: StockLocationRepository,
     private val eventPublisher: EventPublisher,
-    private val productImageStorageService: ProductImageStorageService
+    private val productImageStorageService: ProductImageStorageService,
+    private val skuGeneratorService: SkuGeneratorService
 ) : Workflow<CreateProductInput, Product> {
 
     override val name = WorkflowConstants.CreateProduct.NAME
@@ -126,7 +128,7 @@ class CreateProductWorkflow(
 
                     // SECURITY: Validate quantities are positive
                     for (variant in productInput.variants) {
-                        if (variant.inventoryQuantity != null && variant.inventoryQuantity < 0) {
+                        if (variant.inventoryQuantity < 0) {
                             throw IllegalArgumentException(
                                 "Inventory quantity cannot be negative for variant '${variant.title}'"
                             )
@@ -219,11 +221,29 @@ class CreateProductWorkflow(
                     productInput.variants.forEach { variantInput ->
                         val productVariant = ProductVariant() // Declare it here
 
+                        // Auto-generate SKU if not provided
+                        val generatedSku = if (variantInput.sku.isNullOrBlank()) {
+                            skuGeneratorService.generateSku().also {
+                                logger.info { "Auto-generated SKU: $it for variant: ${variantInput.title}" }
+                            }
+                        } else {
+                            variantInput.sku
+                        }
+
+                        // Auto-generate EAN-13 if not provided
+                        val generatedEan = if (variantInput.ean.isNullOrBlank()) {
+                            skuGeneratorService.generateEan13().also {
+                                logger.info { "Auto-generated EAN-13: $it for variant: ${variantInput.title}" }
+                            }
+                        } else {
+                            variantInput.ean
+                        }
+
                         productVariant.apply { // Apply properties to it
                             this.title = variantInput.title
-                            this.sku = variantInput.sku
-                            this.ean = variantInput.ean
-                            this.barcode = variantInput.barcode
+                            this.sku = generatedSku
+                            this.ean = generatedEan
+                            this.barcode = variantInput.barcode ?: generatedEan // Use EAN as barcode if not provided
                             // this.inventoryQuantity = variantInput.inventoryQuantity // Inventory is managed via InventoryItems
                             this.manageInventory = variantInput.manageInventory
                             this.allowBackorder = variantInput.allowBackorder
@@ -372,23 +392,24 @@ class CreateProductWorkflow(
 
                     val uploadedUrls = productImageStorageService.uploadAndResolveUrls(sources, product.id)
 
-                    uploadedUrls.forEach { imageUrl ->
+                    uploadedUrls.forEachIndexed { index, imageUrl ->
                         val productImage = ProductImage().apply {
                             this.url = imageUrl
-                            this.product = product // Set the Product object directly
+                            this.position = index
                         }
-                        productImageRepository.save(productImage)
+                        product.addImage(productImage) // Use addImage to establish bidirectional relationship
                     }
 
                     if (uploadedUrls.isNotEmpty()) {
                         // Always store a URL (never a raw data URL)
                         product.thumbnail = uploadedUrls.first()
-                        productRepository.save(product)
                     } else if (productInput.thumbnail?.isNotBlank() == true && product.thumbnail.isNullOrBlank()) {
                         // Fallback: if upload skipped but a thumbnail string exists, clear it to avoid persisting raw data
                         product.thumbnail = null
-                        productRepository.save(product)
                     }
+
+                    // Save product with cascaded images
+                    productRepository.save(product)
                     StepResponse.of(product, product.id) // Compensation: product ID to clean images
                 },
                 compensate = { _, ctx ->

@@ -2,6 +2,9 @@ package com.vernont.workflow.flows.fulfillment
 
 import com.vernont.domain.fulfillment.Fulfillment
 import com.vernont.domain.fulfillment.FulfillmentItem
+import com.vernont.events.EventPublisher
+import com.vernont.events.FulfillmentCreated
+import com.vernont.events.FulfillmentItemData
 import com.vernont.repository.fulfillment.FulfillmentProviderRepository
 import com.vernont.repository.fulfillment.FulfillmentRepository
 import com.vernont.repository.inventory.StockLocationRepository
@@ -102,7 +105,8 @@ data class CreateFulfillmentInput(
 class CreateFulfillmentWorkflow(
     private val fulfillmentRepository: FulfillmentRepository,
     private val fulfillmentProviderRepository: FulfillmentProviderRepository,
-    private val stockLocationRepository: StockLocationRepository
+    private val stockLocationRepository: StockLocationRepository,
+    private val eventPublisher: EventPublisher
 ) : Workflow<CreateFulfillmentInput, Fulfillment> {
 
     override val name = WorkflowConstants.CreateFulfillment.NAME
@@ -272,6 +276,28 @@ class CreateFulfillmentWorkflow(
             val location = getLocationStep.invoke(input.locationId, context).data
             val provider = validateProviderStep.invoke(input.providerId, context).data
             val fulfillment = createFulfillmentStep.invoke(input, context).data
+
+            // Publish FulfillmentCreated event - inventory listener will handle decrement
+            val itemsData = input.items.map { item ->
+                FulfillmentItemData(
+                    sku = item.sku,
+                    quantity = item.quantity,
+                    title = item.title,
+                    lineItemId = item.lineItemId
+                )
+            }
+
+            eventPublisher.publish(
+                FulfillmentCreated(
+                    aggregateId = fulfillment.id,
+                    orderId = input.orderId ?: "",
+                    locationId = input.locationId,
+                    providerId = input.providerId,
+                    status = "PENDING",
+                    items = itemsData
+                )
+            )
+            logger.info { "Published FulfillmentCreated event for ${itemsData.size} items" }
 
             logger.info { "Create fulfillment workflow completed. Fulfillment ID: ${fulfillment.id}" }
 

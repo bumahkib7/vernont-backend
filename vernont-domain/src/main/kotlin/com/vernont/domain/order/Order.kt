@@ -54,6 +54,14 @@ class Order : BaseEntity() {
 
     @Column(precision = 19, scale = 4, nullable = false) var discount: BigDecimal = BigDecimal.ZERO
 
+    /** Amount paid with gift cards (in currency units, e.g. pounds) */
+    @Column(name = "gift_card_amount", precision = 19, scale = 4, nullable = false)
+    var giftCardAmount: BigDecimal = BigDecimal.ZERO
+
+    /** Promotion code applied (if any) */
+    @Column(name = "promotion_code", length = 50)
+    var promotionCode: String? = null
+
     @Column(precision = 19, scale = 4, nullable = false) var total: BigDecimal = BigDecimal.ZERO
 
     @Enumerated(EnumType.STRING)
@@ -88,6 +96,8 @@ class Order : BaseEntity() {
 
     @Column var paymentMethodId: String? = null
 
+    @Column(name = "payment_intent_id") var paymentIntentId: String? = null
+
     @Column(columnDefinition = "TEXT") var note: String? = null
 
     @Column var canceledAt: String? = null
@@ -106,7 +116,20 @@ class Order : BaseEntity() {
 
     fun recalculateTotals() {
         subtotal = items.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.total) }
-        total = subtotal.add(tax).add(shipping).subtract(discount)
+        // Total = subtotal + tax + shipping - discount - giftCardAmount
+        total = subtotal.add(tax).add(shipping).subtract(discount).subtract(giftCardAmount)
+        // Ensure total is never negative
+        if (total < BigDecimal.ZERO) {
+            total = BigDecimal.ZERO
+        }
+    }
+
+    /**
+     * Get the amount that needs to be paid via payment provider (after gift card)
+     */
+    fun getPayableAmount(): BigDecimal {
+        val payable = subtotal.add(tax).add(shipping).subtract(discount).subtract(giftCardAmount)
+        return if (payable < BigDecimal.ZERO) BigDecimal.ZERO else payable
     }
 
     fun cancel() {

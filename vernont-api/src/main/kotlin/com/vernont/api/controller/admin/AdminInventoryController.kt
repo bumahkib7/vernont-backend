@@ -1,6 +1,8 @@
 package com.vernont.api.controller.admin
 
+import com.vernont.domain.inventory.MovementType
 import com.vernont.repository.inventory.InventoryLevelRepository
+import com.vernont.repository.inventory.InventoryMovementRepository
 import com.vernont.repository.inventory.StockLocationRepository
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.*
@@ -8,9 +10,11 @@ import com.vernont.workflow.flows.inventory.*
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.math.BigDecimal
+import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
 
@@ -81,13 +85,35 @@ data class InventoryLevelResponse(
     val incomingQuantity: Int
 )
 
+data class InventoryMovementResponse(
+    val id: String,
+    val eventId: String,
+    val inventoryItemId: String,
+    val inventoryLevelId: String?,
+    val locationId: String,
+    val locationName: String?,
+    val sku: String?,
+    val productTitle: String?,
+    val movementType: String,
+    val quantity: Int,
+    val previousQuantity: Int?,
+    val newQuantity: Int?,
+    val reason: String?,
+    val note: String?,
+    val referenceType: String?,
+    val referenceId: String?,
+    val performedBy: String?,
+    val occurredAt: String
+)
+
 @RestController
 @RequestMapping("/admin/inventory")
 @Tag(name = "Admin Inventory", description = "Inventory management endpoints")
 class AdminInventoryController(
     private val workflowEngine: WorkflowEngine,
     private val inventoryLevelRepository: InventoryLevelRepository,
-    private val stockLocationRepository: StockLocationRepository
+    private val stockLocationRepository: StockLocationRepository,
+    private val inventoryMovementRepository: InventoryMovementRepository
 ) {
 
     // =========================================================================
@@ -349,5 +375,125 @@ class AdminInventoryController(
 
         logger.info { "Deleted stock location: $id" }
         return ResponseEntity.ok(mapOf("message" to "Stock location deleted", "id" to id))
+    }
+
+    // =========================================================================
+    // Inventory Movements (Stock History)
+    // =========================================================================
+
+    @Operation(summary = "List inventory movements", description = "Get paginated list of inventory movements/stock history")
+    @GetMapping("/movements")
+    fun listInventoryMovements(
+        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(defaultValue = "50") limit: Int,
+        @RequestParam(required = false) locationId: String?,
+        @RequestParam(required = false) inventoryItemId: String?,
+        @RequestParam(required = false) inventoryLevelId: String?,
+        @RequestParam(required = false) sku: String?,
+        @RequestParam(required = false) movementType: String?
+    ): ResponseEntity<Map<String, Any>> {
+        logger.info { "GET /admin/inventory/movements - offset=$offset, limit=$limit" }
+
+        val pageable = PageRequest.of(offset / limit.coerceAtLeast(1), limit.coerceAtMost(100))
+
+        val movementTypeEnum = movementType?.let {
+            try {
+                MovementType.valueOf(it.uppercase())
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+
+        val page = inventoryMovementRepository.findByFilters(
+            inventoryItemId = inventoryItemId,
+            locationId = locationId,
+            movementType = movementTypeEnum,
+            sku = sku,
+            pageable = pageable
+        )
+
+        val response = page.content.map { movement ->
+            InventoryMovementResponse(
+                id = movement.id,
+                eventId = movement.eventId,
+                inventoryItemId = movement.inventoryItemId,
+                inventoryLevelId = movement.inventoryLevelId,
+                locationId = movement.locationId,
+                locationName = movement.locationName,
+                sku = movement.sku,
+                productTitle = movement.productTitle,
+                movementType = movement.movementType.name,
+                quantity = movement.quantity,
+                previousQuantity = movement.previousQuantity,
+                newQuantity = movement.newQuantity,
+                reason = movement.reason,
+                note = movement.note,
+                referenceType = movement.referenceType,
+                referenceId = movement.referenceId,
+                performedBy = movement.performedBy,
+                occurredAt = movement.occurredAt.toString()
+            )
+        }
+
+        return ResponseEntity.ok(mapOf(
+            "movements" to response,
+            "count" to page.totalElements,
+            "offset" to offset,
+            "limit" to limit
+        ))
+    }
+
+    @Operation(summary = "Get movements for inventory level", description = "Get stock history for a specific inventory level")
+    @GetMapping("/levels/{id}/movements")
+    fun getMovementsForLevel(
+        @PathVariable id: String,
+        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(defaultValue = "50") limit: Int
+    ): ResponseEntity<Map<String, Any>> {
+        logger.info { "GET /admin/inventory/levels/$id/movements" }
+
+        val pageable = PageRequest.of(offset / limit.coerceAtLeast(1), limit.coerceAtMost(100))
+        val page = inventoryMovementRepository.findByInventoryLevelIdOrderByOccurredAtDesc(id, pageable)
+
+        val response = page.content.map { movement ->
+            InventoryMovementResponse(
+                id = movement.id,
+                eventId = movement.eventId,
+                inventoryItemId = movement.inventoryItemId,
+                inventoryLevelId = movement.inventoryLevelId,
+                locationId = movement.locationId,
+                locationName = movement.locationName,
+                sku = movement.sku,
+                productTitle = movement.productTitle,
+                movementType = movement.movementType.name,
+                quantity = movement.quantity,
+                previousQuantity = movement.previousQuantity,
+                newQuantity = movement.newQuantity,
+                reason = movement.reason,
+                note = movement.note,
+                referenceType = movement.referenceType,
+                referenceId = movement.referenceId,
+                performedBy = movement.performedBy,
+                occurredAt = movement.occurredAt.toString()
+            )
+        }
+
+        return ResponseEntity.ok(mapOf(
+            "movements" to response,
+            "count" to page.totalElements,
+            "offset" to offset,
+            "limit" to limit
+        ))
+    }
+
+    @Operation(summary = "Get movement types", description = "Get all available movement types")
+    @GetMapping("/movements/types")
+    fun getMovementTypes(): ResponseEntity<Map<String, Any>> {
+        val types = MovementType.entries.map { mapOf(
+            "value" to it.name,
+            "label" to it.name.replace("_", " ").lowercase()
+                .replaceFirstChar { c -> c.uppercase() }
+        )}
+        return ResponseEntity.ok(mapOf("movement_types" to types))
     }
 }

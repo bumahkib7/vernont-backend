@@ -2,6 +2,8 @@ package com.vernont.api.admin
 
 import com.vernont.api.dto.admin.*
 import com.vernont.repository.product.ProductCollectionRepository
+import com.vernont.repository.product.ProductRepository
+import org.springframework.transaction.annotation.Transactional
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.WorkflowEngine
 import com.vernont.workflow.flows.collection.CreateCollectionInput
@@ -21,10 +23,12 @@ private val logger = KotlinLogging.logger {}
 @RequestMapping("/admin/collections")
 class AdminCollectionController(
     private val workflowEngine: WorkflowEngine,
-    private val collectionRepository: ProductCollectionRepository
+    private val collectionRepository: ProductCollectionRepository,
+    private val productRepository: ProductRepository
 ) {
 
     @GetMapping
+    @Transactional(readOnly = true)
     fun listCollections(
         @RequestParam(defaultValue = "0") offset: Int,
         @RequestParam(defaultValue = "20") limit: Int
@@ -47,6 +51,7 @@ class AdminCollectionController(
     }
 
     @GetMapping("/{id}")
+    @Transactional(readOnly = true)
     fun getCollection(@PathVariable id: String): ResponseEntity<AdminCollectionResponse> {
         logger.info { "Getting collection: $id" }
 
@@ -81,9 +86,11 @@ class AdminCollectionController(
 
         return when (result) {
             is com.vernont.workflow.engine.WorkflowResult.Success -> {
+                // Reload collection to get full entity for AdminCollection DTO
+                val collection = collectionRepository.findById(result.data.collection.id).get()
                 ResponseEntity.ok(
                     AdminCollectionResponse(
-                        collection = AdminCollection.from(result.data.collection)
+                        collection = AdminCollection.from(collection)
                     )
                 )
             }
@@ -116,9 +123,11 @@ class AdminCollectionController(
 
         return when (result) {
             is com.vernont.workflow.engine.WorkflowResult.Success -> {
+                // Reload collection to get full entity for AdminCollection DTO
+                val collection = collectionRepository.findById(result.data.collection.id).get()
                 ResponseEntity.ok(
                     AdminCollectionResponse(
-                        collection = AdminCollection.from(result.data.collection)
+                        collection = AdminCollection.from(collection)
                     )
                 )
             }
@@ -145,9 +154,11 @@ class AdminCollectionController(
 
         return when (result) {
             is com.vernont.workflow.engine.WorkflowResult.Success -> {
+                // Reload collection to get full entity for AdminCollection DTO
+                val collection = collectionRepository.findById(result.data.collection.id).get()
                 ResponseEntity.ok(
                     AdminCollectionResponse(
-                        collection = AdminCollection.from(result.data.collection)
+                        collection = AdminCollection.from(collection)
                     )
                 )
             }
@@ -171,6 +182,84 @@ class AdminCollectionController(
             DeleteCollectionResponse(
                 id = id,
                 deleted = true
+            )
+        )
+    }
+
+    @PostMapping("/{id}/products")
+    @Transactional
+    fun manageCollectionProducts(
+        @PathVariable id: String,
+        @RequestBody request: ManageProductsRequest
+    ): ResponseEntity<AdminCollectionResponse> {
+        logger.info { "Managing products for collection: $id, add=${request.add?.size ?: 0}, remove=${request.remove?.size ?: 0}" }
+
+        val collection = collectionRepository.findById(id)
+            .orElseThrow { IllegalArgumentException("Collection not found: $id") }
+
+        // Add products to collection
+        request.add?.forEach { productId ->
+            val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            if (product != null) {
+                product.collection = collection
+                productRepository.save(product)
+                logger.debug { "Added product $productId to collection $id" }
+            } else {
+                logger.warn { "Product $productId not found, skipping" }
+            }
+        }
+
+        // Remove products from collection
+        request.remove?.forEach { productId ->
+            val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            if (product != null && product.collection?.id == id) {
+                product.collection = null
+                productRepository.save(product)
+                logger.debug { "Removed product $productId from collection $id" }
+            }
+        }
+
+        // Reload collection with updated products
+        val updatedCollection = collectionRepository.findById(id).get()
+
+        return ResponseEntity.ok(
+            AdminCollectionResponse(
+                collection = AdminCollection.from(updatedCollection)
+            )
+        )
+    }
+
+    @GetMapping("/{id}/products")
+    fun getCollectionProducts(
+        @PathVariable id: String,
+        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(defaultValue = "20") limit: Int
+    ): ResponseEntity<CollectionProductsResponse> {
+        logger.info { "Getting products for collection: $id" }
+
+        val collection = collectionRepository.findById(id)
+            .orElseThrow { IllegalArgumentException("Collection not found: $id") }
+
+        val products = collection.products
+            .filter { it.deletedAt == null }
+            .drop(offset)
+            .take(limit)
+            .map { product ->
+                CollectionProduct(
+                    id = product.id,
+                    title = product.title,
+                    handle = product.handle,
+                    thumbnail = product.thumbnail,
+                    status = product.status.name
+                )
+            }
+
+        return ResponseEntity.ok(
+            CollectionProductsResponse(
+                products = products,
+                count = collection.products.count { it.deletedAt == null },
+                offset = offset,
+                limit = limit
             )
         )
     }

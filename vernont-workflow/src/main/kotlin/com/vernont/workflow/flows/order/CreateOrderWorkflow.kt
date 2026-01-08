@@ -10,6 +10,7 @@ import com.vernont.events.OrderCreated
 import com.vernont.events.OrderItem
 import com.vernont.events.EventPublisher
 import com.vernont.application.order.OrderEventService
+import com.vernont.application.giftcard.GiftCardOrderService
 import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.customer.CustomerAddressRepository
 import com.vernont.repository.fulfillment.FulfillmentRepository
@@ -40,7 +41,9 @@ private val logger = KotlinLogging.logger {}
 data class CreateOrderInput(
     val cartId: String,
     val customerId: String?,
-    val email: String
+    val email: String,
+    /** Optional gift card code to apply */
+    val giftCardCode: String? = null
 )
 
 /**
@@ -68,7 +71,8 @@ class CreateOrderWorkflow(
     private val paymentRepository: PaymentRepository,
     private val fulfillmentRepository: FulfillmentRepository,
     private val eventPublisher: EventPublisher,
-    private val orderEventService: OrderEventService
+    private val orderEventService: OrderEventService,
+    private val giftCardOrderService: GiftCardOrderService
 ) : Workflow<CreateOrderInput, Order> {
 
     override val name = WorkflowConstants.CreateOrder.NAME
@@ -315,37 +319,93 @@ class CreateOrderWorkflow(
                 }
             )
 
-            // Step 4: Authorize payment
+            // Step 4: Validate and apply gift card (if provided)
+            val applyGiftCardStep = createStep<BigDecimal, BigDecimal>(
+                name = "apply-gift-card",
+                execute = { tax, ctx ->
+                    val cart = ctx.getMetadata("cart")!! as com.vernont.domain.cart.Cart
+                    val orderTotalBeforeGiftCard = cart.subtotal.add(tax).add(cart.shipping).subtract(cart.discount)
+                    val orderTotalCents = orderTotalBeforeGiftCard.multiply(BigDecimal(100)).toInt()
+
+                    var giftCardAmountCents = 0
+                    var giftCardCode: String? = null
+
+                    // Apply gift card if provided
+                    if (!input.giftCardCode.isNullOrBlank()) {
+                        logger.info { "Validating gift card: ${input.giftCardCode}" }
+
+                        val validation = giftCardOrderService.validateGiftCard(
+                            input.giftCardCode,
+                            cart.currencyCode
+                        )
+
+                        if (!validation.valid) {
+                            throw IllegalArgumentException("Gift card error: ${validation.errorMessage}")
+                        }
+
+                        // Calculate how much to use from gift card
+                        val giftCard = validation.giftCard!!
+                        giftCardAmountCents = minOf(validation.availableBalance, orderTotalCents)
+                        giftCardCode = giftCard.code
+
+                        logger.info {
+                            "Gift card ${giftCard.code} validated. " +
+                            "Available: ${validation.availableBalance} cents, " +
+                            "Will use: $giftCardAmountCents cents"
+                        }
+                    }
+
+                    val giftCardAmountDecimal = BigDecimal(giftCardAmountCents).divide(BigDecimal(100))
+                    val payableAmount = orderTotalBeforeGiftCard.subtract(giftCardAmountDecimal)
+                        .coerceAtLeast(BigDecimal.ZERO)
+
+                    ctx.addMetadata("orderTotalBeforeGiftCard", orderTotalBeforeGiftCard)
+                    ctx.addMetadata("giftCardAmountCents", giftCardAmountCents)
+                    ctx.addMetadata("giftCardAmountDecimal", giftCardAmountDecimal)
+                    ctx.addMetadata("giftCardCode", giftCardCode ?: "")
+                    ctx.addMetadata("payableAmount", payableAmount)
+
+                    StepResponse.of(payableAmount)
+                }
+            )
+
+            // Step 5: Authorize payment (for amount after gift card)
             val authorizePaymentStep = createStep<BigDecimal, Payment>(
                 name = "authorize-payment",
-                execute = { tax, ctx ->
-                    logger.debug { "Authorizing payment" }
-                    
+                execute = { payableAmount, ctx ->
+                    logger.debug { "Authorizing payment for payable amount: $payableAmount" }
+
                     val cart = ctx.getMetadata("cart")!! as com.vernont.domain.cart.Cart
-                    val totalAmount = cart.subtotal.add(tax).add(cart.shipping).subtract(cart.discount)
-                    
-                    // Create payment entity
+                    val orderTotalBeforeGiftCard = ctx.getMetadata("orderTotalBeforeGiftCard") as BigDecimal
+
+                    // Create payment entity - amount is what customer pays (after gift card)
                     val payment = Payment().apply {
                         cartId = cart.id
                         currencyCode = cart.currencyCode
-                        amount = totalAmount
+                        amount = payableAmount
                         status = PaymentStatus.PENDING
-                        
+
                         // In a real system, this would integrate with a payment provider
                         // For now, we'll simulate authorization
                         externalId = "sim_auth_${System.currentTimeMillis()}"
                     }
-                    
+
                     val savedPayment = paymentRepository.save(payment)
-                    
-                    // Simulate authorization
-                    savedPayment.authorize()
+
+                    // Simulate authorization (skip if amount is zero - fully covered by gift card)
+                    if (payableAmount > BigDecimal.ZERO) {
+                        savedPayment.authorize()
+                    } else {
+                        // No payment needed - fully covered by gift card
+                        savedPayment.status = PaymentStatus.CAPTURED
+                        logger.info { "Order fully covered by gift card - no payment authorization needed" }
+                    }
                     val authorizedPayment = paymentRepository.save(savedPayment)
-                    
+
                     ctx.addMetadata("paymentId", authorizedPayment.id)
-                    ctx.addMetadata("totalAmount", totalAmount)
-                    
-                    logger.info { "Payment authorized: ${authorizedPayment.id} for amount $totalAmount" }
+                    ctx.addMetadata("totalAmount", orderTotalBeforeGiftCard)
+
+                    logger.info { "Payment authorized: ${authorizedPayment.id} for amount $payableAmount (order total: $orderTotalBeforeGiftCard)" }
                     StepResponse.of(authorizedPayment)
                 },
                 compensate = { _, ctx ->

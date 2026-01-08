@@ -416,6 +416,18 @@ class ProductService(
     }
 
     /**
+     * List product summaries with pagination (for admin list view)
+     */
+    @Transactional(readOnly = true)
+    fun listProductSummaries(pageable: Pageable): Page<ProductSummaryResponse> {
+        val spec = Specification<Product> { root, _, cb ->
+            cb.isNull(root.get<java.time.OffsetDateTime>("deletedAt"))
+        }
+        return productRepository.findAll(spec, pageable)
+            .map { signProductSummary(ProductSummaryResponse.from(it)) }
+    }
+
+    /**
      * List products by status
      */
     @Transactional(readOnly = true)
@@ -564,6 +576,26 @@ class ProductService(
             request.width?.let { width = it }
         }
 
+        // Update prices if provided
+        request.prices?.let { priceRequests ->
+            // Remove existing prices
+            variant.prices.forEach { it.softDelete() }
+            variant.prices.clear()
+
+            // Add new prices
+            priceRequests.forEach { priceRequest ->
+                val price = ProductVariantPrice().apply {
+                    currencyCode = priceRequest.currencyCode
+                    amount = priceRequest.amount
+                    compareAtPrice = priceRequest.compareAtPrice
+                    regionId = priceRequest.regionId
+                    minQuantity = priceRequest.minQuantity
+                    maxQuantity = priceRequest.maxQuantity
+                }
+                variant.addPrice(price)
+            }
+        }
+
         val updated = productRepository.save(product)
 
         logger.info { "Variant updated: $variantId" }
@@ -641,6 +673,85 @@ class ProductService(
     }
 
     /**
+     * Update image properties (position, alt text)
+     */
+    fun updateImage(productId: String, imageId: String, request: UpdateProductImageRequest): ProductResponse {
+        logger.info { "Updating image $imageId for product: $productId" }
+
+        val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            ?: throw ProductNotFoundException("Product not found: $productId")
+
+        val image = product.images.find { it.id == imageId }
+            ?: throw ProductImageNotFoundException("Image not found: $imageId")
+
+        request.altText?.let { image.altText = it }
+        request.position?.let { image.position = it }
+
+        val updated = productRepository.save(product)
+
+        logger.info { "Image updated: $imageId" }
+        return signProductMedia(ProductResponse.from(updated))
+    }
+
+    /**
+     * Reorder images - sets positions based on the order of imageIds
+     */
+    fun reorderImages(productId: String, request: ReorderImagesRequest): ProductResponse {
+        logger.info { "Reordering images for product: $productId" }
+
+        val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            ?: throw ProductNotFoundException("Product not found: $productId")
+
+        val activeImages = product.images.filter { it.deletedAt == null }
+        val imageMap = activeImages.associateBy { it.id }
+
+        // Update positions based on the order in the request
+        request.imageIds.forEachIndexed { index, imageId ->
+            imageMap[imageId]?.position = index
+        }
+
+        // Update thumbnail to first image if it's in the list
+        if (request.imageIds.isNotEmpty()) {
+            val firstImage = imageMap[request.imageIds.first()]
+            if (firstImage != null) {
+                product.thumbnail = firstImage.url
+            }
+        }
+
+        val updated = productRepository.save(product)
+
+        logger.info { "Images reordered for product: $productId" }
+        return signProductMedia(ProductResponse.from(updated))
+    }
+
+    /**
+     * Set product thumbnail
+     */
+    fun setThumbnail(productId: String, request: SetThumbnailRequest): ProductResponse {
+        logger.info { "Setting thumbnail for product: $productId" }
+
+        val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            ?: throw ProductNotFoundException("Product not found: $productId")
+
+        val thumbnailUrl = when {
+            request.imageId != null -> {
+                val image = product.images.find { it.id == request.imageId && it.deletedAt == null }
+                    ?: throw ProductImageNotFoundException("Image not found: ${request.imageId}")
+                image.url
+            }
+            request.url != null -> request.url
+            else -> throw IllegalArgumentException("Either imageId or url must be provided")
+        }
+
+        product.thumbnail = thumbnailUrl
+
+        val updated = productRepository.save(product)
+
+        logger.info { "Thumbnail set for product: $productId" }
+        return signProductMedia(ProductResponse.from(updated))
+    }
+
+    /**
      * Add option to product
      */
     fun addOption(productId: String, @Valid request: CreateProductOptionRequest): ProductResponse {
@@ -684,6 +795,37 @@ class ProductService(
         val updated = productRepository.save(product)
 
         logger.info { "Option deleted: $optionId" }
+        return signProductMedia(ProductResponse.from(updated))
+    }
+
+    /**
+     * Update option
+     */
+    fun updateOption(
+        productId: String,
+        optionId: String,
+        @Valid request: UpdateProductOptionRequest
+    ): ProductResponse {
+        logger.info { "Updating option $optionId for product: $productId" }
+
+        val product = productRepository.findByIdAndDeletedAtIsNull(productId)
+            ?: throw ProductNotFoundException("Product not found: $productId")
+
+        val option = product.options.find { it.id == optionId }
+            ?: throw ProductOptionNotFoundException("Option not found: $optionId")
+
+        request.title?.let { newTitle ->
+            if (product.options.any { it.id != optionId && it.title == newTitle }) {
+                throw ProductOptionAlreadyExistsException("Option with title '$newTitle' already exists")
+            }
+            option.title = newTitle
+        }
+        request.values?.let { option.values = it.toMutableList() }
+        request.position?.let { option.position = it }
+
+        val updated = productRepository.save(product)
+
+        logger.info { "Option updated: $optionId" }
         return signProductMedia(ProductResponse.from(updated))
     }
 

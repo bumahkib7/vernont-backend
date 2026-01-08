@@ -31,6 +31,19 @@ class InternalUserService(
             ?: throw IllegalArgumentException("User with ID $userId not found")
     }
 
+    /**
+     * Validates that an email doesn't already exist in the system.
+     * Used before sending invite emails to avoid sending to existing users.
+     * @throws IllegalArgumentException if email already exists
+     */
+    @Transactional(readOnly = true)
+    fun validateEmailNotExists(email: String) {
+        val normalizedEmail = email.lowercase().trim()
+        if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            throw IllegalArgumentException("User with email '$normalizedEmail' already exists")
+        }
+    }
+
     @Transactional
     fun createInternalUser(
         email: String,
@@ -75,6 +88,69 @@ class InternalUserService(
             this.roles = roles
         }
 
+        return userRepository.save(user)
+    }
+
+    /**
+     * Creates an internal user via invite flow (sets PENDING status)
+     */
+    @Transactional
+    fun createInvitedUser(
+        email: String,
+        password: String,
+        firstName: String?,
+        lastName: String?,
+        roleNames: List<String>
+    ): User {
+        val normalizedEmail = email.lowercase().trim()
+        logger.info { "Creating invited internal user: $normalizedEmail" }
+
+        if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+            throw IllegalArgumentException("User with email '$normalizedEmail' already exists")
+        }
+
+        if (roleNames.isEmpty()) {
+            throw IllegalArgumentException("At least one role is required")
+        }
+
+        val nonCustomerRoles = roleNames.filter { it != Role.CUSTOMER && it != Role.GUEST }
+        if (nonCustomerRoles.isEmpty()) {
+            throw IllegalArgumentException("Internal users must have at least one administrative role")
+        }
+
+        val roles = roleRepository.findByNameIn(roleNames).toMutableSet()
+        if (roles.size != roleNames.size) {
+            val foundNames = roles.map { it.name }.toSet()
+            val missing = roleNames.filter { !foundNames.contains(it) }
+            throw IllegalArgumentException("Roles not found: $missing")
+        }
+
+        val user = User().apply {
+            this.email = normalizedEmail
+            this.passwordHash = passwordEncoder.encode(password)
+            this.firstName = firstName
+            this.lastName = lastName
+            this.isActive = false // Not active until they accept invite
+            this.emailVerified = false
+            this.roles = roles
+            markAsInvited() // Sets inviteStatus = PENDING
+        }
+
+        return userRepository.save(user)
+    }
+
+    /**
+     * Marks a user's invite as accepted (called when they set their password)
+     */
+    @Transactional
+    fun acceptInvite(userId: String): User {
+        logger.info { "Accepting invite for user: $userId" }
+        val user = userRepository.findByIdWithRoles(userId)
+            ?: throw IllegalArgumentException("User with ID $userId not found")
+
+        user.acceptInvite()
+        user.isActive = true
+        user.emailVerified = true
         return userRepository.save(user)
     }
 
@@ -127,14 +203,63 @@ class InternalUserService(
         return userRepository.save(user)
     }
 
+    /**
+     * Archives (soft deletes) an internal user.
+     * User can be restored later.
+     */
     @Transactional
-    fun deleteInternalUser(userId: String) {
-        logger.info { "Deleting user: $userId" }
+    fun archiveInternalUser(userId: String) {
+        logger.info { "Archiving user: $userId" }
         val user = userRepository.findByIdWithRoles(userId)
             ?: throw IllegalArgumentException("User with ID $userId not found")
-        
-        user.softDelete(deletedBy = "ADMIN") // Assuming soft delete from BaseEntity
+
+        user.softDelete(deletedBy = "ADMIN")
         userRepository.save(user)
+    }
+
+    /**
+     * Alias for archiveInternalUser for backwards compatibility.
+     */
+    @Transactional
+    fun deleteInternalUser(userId: String) {
+        archiveInternalUser(userId)
+    }
+
+    /**
+     * Permanently deletes an internal user and all associated data.
+     * THIS CANNOT BE UNDONE.
+     */
+    @Transactional
+    fun hardDeleteInternalUser(userId: String) {
+        logger.warn { "HARD DELETING user: $userId - this cannot be undone!" }
+        val user = userRepository.findByIdWithRoles(userId)
+            ?: throw IllegalArgumentException("User with ID $userId not found")
+
+        // Clear roles first (removes from user_role join table)
+        user.roles.clear()
+        userRepository.save(user)
+
+        // Now delete the user permanently
+        userRepository.delete(user)
+        logger.info { "User $userId permanently deleted" }
+    }
+
+    /**
+     * Restores a previously archived (soft-deleted) user.
+     */
+    @Transactional
+    fun restoreInternalUser(userId: String): User {
+        logger.info { "Restoring user: $userId" }
+        // Need to find including deleted
+        val user = userRepository.findByIdIncludingDeleted(userId)
+            ?: throw IllegalArgumentException("User with ID $userId not found")
+
+        if (user.deletedAt == null) {
+            throw IllegalArgumentException("User $userId is not archived")
+        }
+
+        user.restore()
+        return userRepository.save(user)
     }
 }
 

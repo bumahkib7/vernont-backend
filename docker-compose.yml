@@ -54,6 +54,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     environment:
       # Database
       DATABASE_URL: jdbc:postgresql://postgres:5432/vernont
@@ -103,6 +105,11 @@ services:
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       PORT: 8080
 
+      # Messaging (Redpanda/Kafka)
+      MESSAGING_PROVIDER: kafka
+      MESSAGING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      MESSAGING_KAFKA_CONSUMER_GROUP_ID: vernont-inventory-consumer
+
       # Dev Seeding
       DEV_SEED: "true"
 
@@ -117,6 +124,63 @@ services:
       driver: "json-file"
       options:
         max-size: "100m"
+        max-file: "3"
+
+  redpanda:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: vernont-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=info
+    ports:
+      - "18081:18081"  # Schema Registry
+      - "18082:18082"  # REST Proxy
+      - "19092:19092"  # Kafka API
+      - "19644:9644"   # Admin API
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - vernont
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  redpanda-console:
+    image: redpandadata/console:v2.5.2
+    container_name: vernont-redpanda-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8088:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    networks:
+      - vernont
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
         max-file: "3"
 
   minio:
@@ -145,10 +209,27 @@ services:
         max-size: "50m"
         max-file: "3"
 
+  minio-init:
+    image: minio/mc:latest
+    container_name: vernont-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/vernont --ignore-existing;
+      mc anonymous set download myminio/vernont;
+      echo 'Bucket vernont created and configured';
+      "
+    networks:
+      - vernont
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  redpanda_data:
 
 networks:
   vernont:

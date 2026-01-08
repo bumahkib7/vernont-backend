@@ -73,19 +73,19 @@ class PromotionRule : BaseEntity() {
     }
 
     private fun evaluateProductIds(context: Map<String, Any>): Boolean {
-        val productIds = context["productIds"] as? Set<String> ?: return false
+        val productIds = context["productIds"] as? Set<*> ?: return false
         val requiredIds = value?.split(",")?.toSet() ?: return false
         return productIds.any { it in requiredIds }
     }
 
     private fun evaluateProductCollections(context: Map<String, Any>): Boolean {
-        val collectionIds = context["collectionIds"] as? Set<String> ?: return false
+        val collectionIds = context["collectionIds"] as? Set<*> ?: return false
         val requiredIds = value?.split(",")?.toSet() ?: return false
         return collectionIds.any { it in requiredIds }
     }
 
     private fun evaluateProductTypes(context: Map<String, Any>): Boolean {
-        val typeIds = context["typeIds"] as? Set<String> ?: return false
+        val typeIds = context["typeIds"] as? Set<*> ?: return false
         val requiredIds = value?.split(",")?.toSet() ?: return false
         return typeIds.any { it in requiredIds }
     }

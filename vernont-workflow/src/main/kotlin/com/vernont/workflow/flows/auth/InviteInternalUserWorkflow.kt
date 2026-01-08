@@ -1,7 +1,10 @@
 package com.vernont.workflow.flows.auth
 
 import com.vernont.application.auth.InternalUserService
+import com.vernont.events.InternalUserInvitedEvent
 import com.vernont.infrastructure.email.EmailService
+import com.vernont.infrastructure.messaging.MessagingService
+import com.vernont.infrastructure.messaging.MessagingTopics
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.Workflow
 import com.vernont.workflow.engine.WorkflowContext
@@ -23,6 +26,7 @@ import java.util.*
 class InviteInternalUserWorkflow(
     private val userService: InternalUserService,
     private val emailService: EmailService,
+    private val messagingService: MessagingService,
     @Value("\${app.jwt.secret}") private val jwtSecret: String,
     @Value("\${app.jwt.expiration-ms:3600000}") private val jwtExpirationMs: Long
 ) : Workflow<InviteInternalUserInput, InviteInternalUserOutput> {
@@ -35,30 +39,23 @@ class InviteInternalUserWorkflow(
         context: WorkflowContext
     ): WorkflowResult<InviteInternalUserOutput> {
         return try {
-            // 1) Create user with strong temporary password
-            val tempPassword = generateTempPassword()
-            val user = userService.createInternalUser(
-                email = input.email,
-                password = tempPassword,
-                firstName = input.firstName,
-                lastName = input.lastName,
-                roleNames = input.roles
-            )
+            // 1) Validate: check if user already exists BEFORE doing anything
+            userService.validateEmailNotExists(input.email)
 
-            // 2) Generate reset token directly (no need to look up the just-created user)
+            // 2) Generate reset token BEFORE creating user (token is based on email, not user ID)
             val key = buildSecretKey(jwtSecret)
             val now = Instant.now()
             val expiryDate = Date(now.toEpochMilli() + jwtExpirationMs)
 
             val token = Jwts.builder()
-                .subject(user.email)
+                .subject(input.email)
                 .issuedAt(Date.from(now))
                 .expiration(expiryDate)
                 .claim("actorType", "user")
                 .signWith(key)
                 .compact()
 
-            // 3) Send email using branded template
+            // 3) Send email BEFORE creating user - if this fails, no user is created
             val resetLink = "${input.adminUrl}/forgot-password?token=$token"
             val subject = "You're invited to Vernont Admin"
             val templateData = mapOf(
@@ -78,10 +75,43 @@ class InviteInternalUserWorkflow(
                 templateData = templateData,
                 subject = subject
             )
+            logger.info { "Invite email sent successfully to ${input.email}" }
+
+            // 4) Email succeeded - NOW create and save the user
+            val tempPassword = generateTempPassword()
+            val user = userService.createInvitedUser(
+                email = input.email,
+                password = tempPassword,
+                firstName = input.firstName,
+                lastName = input.lastName,
+                roleNames = input.roles
+            )
+            logger.info { "Created invited user ${user.id} for ${user.email}" }
+
+            // 5) Publish event to Redpanda for admin notifications (non-blocking)
+            try {
+                val event = InternalUserInvitedEvent(
+                    userId = user.id,
+                    email = user.email,
+                    firstName = user.firstName,
+                    lastName = user.lastName,
+                    roles = input.roles,
+                    invitedBy = context.getMetadata("actorId") as? String
+                )
+                messagingService.publish(
+                    topic = MessagingTopics.ADMIN_EVENTS,
+                    key = user.id,
+                    event = event
+                )
+                logger.info { "Published InternalUserInvitedEvent for user ${user.id}" }
+            } catch (pubEx: Exception) {
+                // Don't fail the workflow if event publishing fails - the invite succeeded
+                logger.warn(pubEx) { "Failed to publish InternalUserInvitedEvent: ${pubEx.message}" }
+            }
 
             WorkflowResult.success(InviteInternalUserOutput(user.id, user.email))
         } catch (e: Exception) {
-            logger.error(e) { "InviteInternalUserWorkflow failed: ${'$'}{e.message}" }
+            logger.error(e) { "InviteInternalUserWorkflow failed: ${e.message}" }
             WorkflowResult.failure(e)
         }
     }

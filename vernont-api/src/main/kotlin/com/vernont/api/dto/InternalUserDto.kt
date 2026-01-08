@@ -1,5 +1,6 @@
 package com.vernont.api.dto
 
+import com.vernont.domain.auth.InviteStatus
 import com.vernont.domain.auth.User
 import java.time.Instant
 
@@ -16,6 +17,9 @@ data class InternalUserDto(
     val isActive: Boolean,
     val emailVerified: Boolean,
     val lastLoginAt: Instant?,
+    val inviteStatus: String,
+    val invitedAt: Instant?,
+    val inviteAcceptedAt: Instant?,
     val roles: List<String>,
     val createdAt: Instant,
     val updatedAt: Instant
@@ -57,6 +61,9 @@ fun User.toInternalUserDto(): InternalUserDto {
         isActive = this.isActive,
         emailVerified = this.emailVerified,
         lastLoginAt = this.lastLoginAt,
+        inviteStatus = this.inviteStatus.name,
+        invitedAt = this.invitedAt,
+        inviteAcceptedAt = this.inviteAcceptedAt,
         roles = this.roles.map { it.name }.sorted(),
         createdAt = this.createdAt,
         updatedAt = this.updatedAt
@@ -66,3 +73,13 @@ fun User.toInternalUserDto(): InternalUserDto {
 fun List<User>.toInternalUserDtos(): List<InternalUserDto> {
     return this.map { it.toInternalUserDto() }
 }
+
+/**
+ * Response wrapper for list of internal users
+ */
+data class InternalUsersResponse(
+    val users: List<InternalUserDto>,
+    val count: Int,
+    val offset: Int,
+    val limit: Int
+)

@@ -43,6 +43,12 @@ dependencies {
     // AWS SDK S3
     implementation("software.amazon.awssdk:s3:2.25.21")
 
+    // AWS SQS (for production messaging)
+    implementation("software.amazon.awssdk:sqs:2.25.21")
+
+    // Spring Kafka (for Redpanda in dev)
+    implementation("org.springframework.kafka:spring-kafka:4.0.1")
+
     // Spring Boot Actuator (useful for monitoring)
     implementation("org.springframework.boot:spring-boot-starter-actuator:4.0.1")
 

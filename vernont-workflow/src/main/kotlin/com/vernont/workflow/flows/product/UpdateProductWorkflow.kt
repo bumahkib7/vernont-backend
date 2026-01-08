@@ -19,6 +19,9 @@ import com.vernont.workflow.engine.WorkflowTypes
 import com.vernont.workflow.steps.StepResponse
 import com.vernont.workflow.steps.createStep
 import com.vernont.workflow.common.WorkflowConstants
+import com.vernont.workflow.common.applyUpdates
+import com.vernont.workflow.common.ifPresent
+import com.vernont.workflow.common.ifNotEmpty
 import com.vernont.workflow.flows.product.UpdateProductVariantInput
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Component
@@ -28,7 +31,7 @@ import java.math.BigDecimal
 private val logger = KotlinLogging.logger {}
 
 /**
- * Input for updating a single product
+ * Input for updating a single product.
  */
 data class UpdateProductInput(
     val id: String? = null,
@@ -36,6 +39,7 @@ data class UpdateProductInput(
     val subtitle: String? = null,
     val description: String? = null,
     val handle: String? = null,
+    val status: String? = null,
     val isGiftcard: Boolean? = null,
     val discountable: Boolean? = null,
     val thumbnail: String? = null,
@@ -147,6 +151,7 @@ class UpdateProductWorkflow(
                                         subtitle = product.subtitle,
                                         description = product.description,
                                         handle = product.handle,
+                                        status = product.status,
                                         isGiftcard = product.isGiftcard,
                                         discountable = product.discountable,
                                         thumbnail = product.thumbnail,
@@ -238,6 +243,7 @@ class UpdateProductWorkflow(
                                     subtitle = existingProduct.subtitle,
                                     description = existingProduct.description,
                                     handle = existingProduct.handle,
+                                    status = existingProduct.status,
                                     isGiftcard = existingProduct.isGiftcard,
                                     discountable = existingProduct.discountable,
                                     thumbnail = existingProduct.thumbnail,
@@ -272,6 +278,7 @@ class UpdateProductWorkflow(
                                     subtitle = product.subtitle,
                                     description = product.description,
                                     handle = product.handle,
+                                    status = product.status,
                                     isGiftcard = product.isGiftcard,
                                     discountable = product.discountable,
                                     thumbnail = product.thumbnail,
@@ -319,6 +326,7 @@ class UpdateProductWorkflow(
                                 product.subtitle = snapshot.subtitle
                                 product.description = snapshot.description
                                 product.handle = snapshot.handle
+                                product.status = snapshot.status
                                 product.isGiftcard = snapshot.isGiftcard
                                 product.discountable = snapshot.discountable
                                 product.thumbnail = snapshot.thumbnail
@@ -381,27 +389,27 @@ class UpdateProductWorkflow(
 
                         val uploaded = productImageStorageService.uploadAndResolveUrls(newImages, product.id)
 
-                        val existing = productImageRepository.findByProductId(product.id)
-                        if (existing.isNotEmpty()) {
-                            productImageRepository.deleteAll(existing)
-                        }
+                        // Clear existing images from the collection (orphanRemoval will delete from DB)
+                        product.images.clear()
 
-                        uploaded.forEach { url ->
+                        // Add new images using addImage to establish bidirectional relationship
+                        uploaded.forEachIndexed { idx, url ->
                             val productImage = ProductImage().apply {
                                 this.url = url
-                                this.product = product
+                                this.position = idx
                             }
-                            productImageRepository.save(productImage)
+                            product.addImage(productImage)
                         }
 
                         if (uploaded.isNotEmpty()) {
                             // Always store URL from storage; if none uploaded, clear unsafe thumbnail
                             product.thumbnail = uploaded.first()
-                            productRepository.save(product)
                         } else if (inputThumb != null && inputThumb.startsWith("data:", ignoreCase = true)) {
                             product.thumbnail = null
-                            productRepository.save(product)
                         }
+
+                        // Save product with cascaded images
+                        productRepository.save(product)
                     }
 
                     ctx.addMetadata("update-product-images", originalImages)
@@ -537,102 +545,155 @@ class UpdateProductWorkflow(
     }
 
     /**
-     * Apply updates to a product entity with full business logic
+     * Apply updates to a product entity using DSL for clean partial updates
      */
     private fun applyProductUpdates(product: Product, input: UpdateProductInput) {
-        input.title?.let { product.title = it }
-        input.subtitle?.let { product.subtitle = it }
-        input.description?.let { product.description = it }
-        input.handle?.let {
-            // Validate handle uniqueness
-            if (productRepository.existsByHandleAndIdNot(it, product.id)) {
-                throw IllegalArgumentException("Product handle '$it' already exists")
+        product.applyUpdates {
+            // Basic fields
+            input.title ifPresent { title = it }
+            input.subtitle ifPresent { subtitle = it }
+            input.description ifPresent { description = it }
+
+            // Handle with uniqueness validation
+            input.handle ifPresent { newHandle ->
+                validateHandleUnique(newHandle, product.id)
+                handle = newHandle
             }
-            product.handle = it
-        }
-        input.isGiftcard?.let { product.isGiftcard = it }
-        input.discountable?.let { product.discountable = it }
-        // Thumbnail is handled in the image upload step; ignore raw input here to avoid persisting data URLs
-        input.weight?.let { product.weight = it.toString() }
-        input.length?.let { product.length = it.toString() }
-        input.height?.let { product.height = it.toString() }
-        input.width?.let { product.width = it.toString() }
-        input.hsCode?.let { product.hsCode = it }
-        input.originCountry?.let { product.originCountry = it }
-        input.midCode?.let { product.midCode = it }
-        input.material?.let { product.material = it }
-        input.shippingProfileId?.let { product.shippingProfileId = it }
 
-        // Handle collection relationship
-        input.collectionId?.let { collectionId ->
-            val collection = productCollectionRepository.findByIdAndDeletedAtIsNull(collectionId)
-                ?: throw IllegalArgumentException("Product collection not found: $collectionId")
-            product.collection = collection
-        }
+            // Status with enum parsing
+            input.status ifPresent { statusStr ->
+                status = parseProductStatus(statusStr)
+            }
 
-        // Handle type relationship
-        input.typeId?.let { typeId ->
-            val type = productTypeRepository.findByIdAndDeletedAtIsNull(typeId)
-                ?: throw IllegalArgumentException("Product type not found: $typeId")
-            product.type = type
+            // Boolean flags
+            input.isGiftcard ifPresent { isGiftcard = it }
+            input.discountable ifPresent { discountable = it }
+
+            // Dimensions (convert Int to String)
+            input.weight ifPresent { weight = it.toString() }
+            input.length ifPresent { length = it.toString() }
+            input.height ifPresent { height = it.toString() }
+            input.width ifPresent { width = it.toString() }
+
+            // String fields
+            input.hsCode ifPresent { hsCode = it }
+            input.originCountry ifPresent { originCountry = it }
+            input.midCode ifPresent { midCode = it }
+            input.material ifPresent { material = it }
+            input.shippingProfileId ifPresent { shippingProfileId = it }
+
+            // Metadata
+            input.metadata ifPresent { metadata = it.toMutableMap() }
         }
 
-        // Handle tags - clear and rebuild
-        input.tags?.let { tagValues ->
+        // Relationships (need repository access, handled separately)
+        input.collectionId ifPresent { collectionId ->
+            product.collection = resolveCollection(collectionId)
+        }
+
+        input.typeId ifPresent { typeId ->
+            product.type = resolveType(typeId)
+        }
+
+        input.tags ifPresent { tagValues ->
             product.tags.clear()
             tagValues.forEach { tagValue ->
-                val tag = productTagRepository.findByValueAndDeletedAtIsNull(tagValue)
-                    ?: throw IllegalArgumentException("Product tag not found: $tagValue")
-                product.tags.add(tag)
+                product.tags.add(resolveOrCreateTag(tagValue))
             }
         }
 
-        // Handle categories - clear and rebuild
-        input.categories?.let { categoryIds ->
+        input.categories ifPresent { categoryIds ->
             product.categories.clear()
             categoryIds.forEach { categoryId ->
-                val category = productCategoryRepository.findByIdAndDeletedAtIsNull(categoryId)
-                    ?: throw IllegalArgumentException("Product category not found: $categoryId")
-                product.categories.add(category)
+                product.categories.add(resolveCategory(categoryId))
             }
-        }
-
-        input.metadata?.let {
-            product.metadata = it.toMutableMap()
         }
     }
 
+    // --- Helper functions for validation and resolution ---
+
+    private fun validateHandleUnique(handle: String, productId: String) {
+        if (productRepository.existsByHandleAndIdNot(handle, productId)) {
+            throw IllegalArgumentException("Product handle '$handle' already exists")
+        }
+    }
+
+    private fun parseProductStatus(statusStr: String): com.vernont.domain.product.ProductStatus {
+        return try {
+            com.vernont.domain.product.ProductStatus.valueOf(statusStr.uppercase())
+        } catch (e: IllegalArgumentException) {
+            throw IllegalArgumentException(
+                "Invalid product status: $statusStr. Valid values: ${
+                    com.vernont.domain.product.ProductStatus.values().joinToString()
+                }"
+            )
+        }
+    }
+
+    private fun resolveCollection(collectionId: String) =
+        productCollectionRepository.findByIdAndDeletedAtIsNull(collectionId)
+            ?: throw IllegalArgumentException("Product collection not found: $collectionId")
+
+    private fun resolveType(typeId: String) =
+        productTypeRepository.findByIdAndDeletedAtIsNull(typeId)
+            ?: throw IllegalArgumentException("Product type not found: $typeId")
+
+    private fun resolveOrCreateTag(tagValue: String): com.vernont.domain.product.ProductTag {
+        return productTagRepository.findByValueAndDeletedAtIsNull(tagValue)
+            ?: com.vernont.domain.product.ProductTag().apply { value = tagValue }
+                .also { productTagRepository.save(it) }
+    }
+
+    private fun resolveCategory(categoryId: String) =
+        productCategoryRepository.findByIdAndDeletedAtIsNull(categoryId)
+            ?: throw IllegalArgumentException("Product category not found: $categoryId")
+
     /**
-     * Apply updates to a variant entity with full business logic
+     * Apply updates to a variant entity using DSL for clean partial updates
      */
     private fun applyVariantUpdates(
         variant: com.vernont.domain.product.ProductVariant,
         input: UpdateProductVariantInput
     ) {
-        input.title?.let { variant.title = it }
-        input.sku?.let { sku ->
-            // Validate SKU uniqueness
-            val existingVariant = productVariantRepository.findBySku(sku)
-            if (existingVariant != null && existingVariant.id != variant.id) {
-                throw IllegalArgumentException("SKU '$sku' already exists for another variant")
+        variant.applyUpdates {
+            input.title ifPresent { title = it }
+
+            // SKU with uniqueness validation
+            input.sku ifPresent { newSku ->
+                validateSkuUnique(newSku, variant.id)
+                sku = newSku
             }
-            variant.sku = sku
+
+            // Identifier fields
+            input.ean ifPresent { ean = it }
+            input.upc ifPresent { upc = it }
+            input.barcode ifPresent { barcode = it }
+            input.hsCode ifPresent { hsCode = it }
+
+            // Boolean flags
+            input.allowBackorder ifPresent { allowBackorder = it }
+            input.manageInventory ifPresent { manageInventory = it }
+
+            // Dimensions (convert Int to String)
+            input.weight ifPresent { weight = it.toString() }
+            input.length ifPresent { length = it.toString() }
+            input.height ifPresent { height = it.toString() }
+            input.width ifPresent { width = it.toString() }
+
+            // String fields
+            input.originCountry ifPresent { originCountry = it }
+            input.midCode ifPresent { midCode = it }
+            input.material ifPresent { material = it }
+
+            // Metadata
+            input.metadata ifPresent { metadata = it.toMutableMap() }
         }
-        input.ean?.let { variant.ean = it }
-        input.upc?.let { variant.upc = it }
-        input.barcode?.let { variant.barcode = it }
-        input.hsCode?.let { variant.hsCode = it }
-        input.allowBackorder?.let { variant.allowBackorder = it }
-        input.manageInventory?.let { variant.manageInventory = it }
-        input.weight?.let { variant.weight = it.toString() }
-        input.length?.let { variant.length = it.toString() }
-        input.height?.let { variant.height = it.toString() }
-        input.width?.let { variant.width = it.toString() }
-        input.originCountry?.let { variant.originCountry = it }
-        input.midCode?.let { variant.midCode = it }
-        input.material?.let { variant.material = it }
-        input.metadata?.let {
-            variant.metadata = it.toMutableMap()
+    }
+
+    private fun validateSkuUnique(sku: String, variantId: String) {
+        val existingVariant = productVariantRepository.findBySku(sku)
+        if (existingVariant != null && existingVariant.id != variantId) {
+            throw IllegalArgumentException("SKU '$sku' already exists for another variant")
         }
     }
 
@@ -696,6 +757,7 @@ private data class ProductSnapshot(
     val subtitle: String?,
     val description: String?,
     val handle: String,
+    val status: com.vernont.domain.product.ProductStatus,
     val isGiftcard: Boolean,
     val discountable: Boolean,
     val thumbnail: String?,

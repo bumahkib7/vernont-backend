@@ -11,6 +11,9 @@ import com.vernont.workflow.steps.StepResponse
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.WorkflowTypes
 import com.vernont.workflow.steps.createStep
+import com.vernont.workflow.flows.cart.dto.CartResponse
+import com.vernont.workflow.flows.cart.dto.CartDto
+import com.vernont.workflow.flows.cart.dto.CartLineItemDto
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -53,11 +56,11 @@ data class AddShippingMethodToCartInput(
  * @see https://docs.medusajs.com/api/store#carts_postcartsidshippingmethods
  */
 @Component
-@WorkflowTypes(input = AddShippingMethodToCartInput::class, output = Cart::class)
+@WorkflowTypes(input = AddShippingMethodToCartInput::class, output = CartResponse::class)
 class AddShippingMethodToCartWorkflow(
     private val cartRepository: CartRepository,
     private val shippingOptionRepository: ShippingOptionRepository
-) : Workflow<AddShippingMethodToCartInput, Cart> {
+) : Workflow<AddShippingMethodToCartInput, CartResponse> {
 
     override val name = WorkflowConstants.AddShippingMethodToCart.NAME
 
@@ -65,7 +68,7 @@ class AddShippingMethodToCartWorkflow(
     override suspend fun execute(
         input: AddShippingMethodToCartInput,
         context: WorkflowContext
-    ): WorkflowResult<Cart> {
+    ): WorkflowResult<CartResponse> {
         logger.info { "Starting add shipping method workflow for cart: ${input.cartId}, option: ${input.shippingOptionId}" }
 
         try {
@@ -289,7 +292,28 @@ class AddShippingMethodToCartWorkflow(
                 "method: ${shippingOption.name}, cost: $shippingCost"
             }
 
-            return WorkflowResult.success(finalCart)
+            // Convert to CartResponse
+            val cartDto = CartDto(
+                id = finalCart.id,
+                customerId = finalCart.customerId,
+                email = finalCart.email,
+                regionId = finalCart.regionId,
+                currencyCode = finalCart.currencyCode,
+                total = finalCart.total,
+                subtotal = finalCart.subtotal,
+                taxTotal = finalCart.tax,
+                shippingTotal = finalCart.shipping,
+                discountTotal = finalCart.discount,
+                items = finalCart.items.filter { it.deletedAt == null }
+                    .map { CartLineItemDto.from(it) },
+                itemCount = finalCart.items.filter { it.deletedAt == null }.size,
+                createdAt = finalCart.createdAt,
+                updatedAt = finalCart.updatedAt,
+                completedAt = finalCart.completedAt,
+                metadata = finalCart.metadata?.mapValues { it.value.toString() }
+            )
+
+            return WorkflowResult.success(CartResponse(cart = cartDto))
 
         } catch (e: Exception) {
             logger.error(e) { "Add shipping method workflow failed: ${e.message}" }

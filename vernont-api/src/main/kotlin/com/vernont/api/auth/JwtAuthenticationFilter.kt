@@ -52,7 +52,7 @@ class JwtAuthenticationFilter(private val jwtTokenProvider: JwtTokenProvider) :
         val path = request.requestURI
 
         val cookieName = when {
-            path.startsWith("/admin") || path.startsWith("/api/v1/internal") ->
+            path.startsWith("/admin") || path.startsWith("/api/v1/internal") || path.startsWith("/api/admin") ->
                 com.vernont.api.controller.InternalAuthController.ACCESS_TOKEN_COOKIE
             else ->
                 AuthController.ACCESS_TOKEN_COOKIE

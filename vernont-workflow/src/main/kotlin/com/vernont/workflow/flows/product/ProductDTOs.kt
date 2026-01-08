@@ -4,11 +4,11 @@ import com.vernont.domain.product.ProductStatus
 import java.math.BigDecimal
 
 data class CreateProductInput(
-    val title: String,
+    val title: String = "",
     val description: String? = null,
-    val handle: String,
+    val handle: String = "",
     val status: ProductStatus = ProductStatus.DRAFT,
-    val shippingProfileId: String,
+    val shippingProfileId: String = "default",
     val images: List<String> = emptyList(),
     val thumbnail: String? = null,
     val options: List<ProductOptionInput> = emptyList(),
@@ -19,25 +19,25 @@ data class CreateProductInput(
 
 
 data class ProductOptionInput(
-    val title: String,
-    val values: List<String>
+    val title: String = "",
+    val values: List<String> = emptyList()
 )
 
 data class ProductVariantInput(
-    val title: String,
-    val sku: String?,
-    val ean: String?,
-    val barcode: String?,
-    val inventoryQuantity: Int,
-    val manageInventory: Boolean,
-    val allowBackorder: Boolean,
-    val options: Map<String, String>, // e.g., {"Color": "Red", "Size": "M"}
-    val prices: List<ProductVariantPriceInput>
+    val title: String = "",
+    val sku: String? = null,
+    val ean: String? = null,
+    val barcode: String? = null,
+    val inventoryQuantity: Int = 0,
+    val manageInventory: Boolean = true,
+    val allowBackorder: Boolean = false,
+    val options: Map<String, String> = emptyMap(), // e.g., {"Color": "Red", "Size": "M"}
+    val prices: List<ProductVariantPriceInput> = emptyList()
 )
 
 data class ProductVariantPriceInput(
-    val currencyCode: String,
-    val amount: BigDecimal,
+    val currencyCode: String = "GBP",
+    val amount: BigDecimal = BigDecimal.ZERO,
     val regionId: String? = null // Optional, for region-specific pricing
 )
 

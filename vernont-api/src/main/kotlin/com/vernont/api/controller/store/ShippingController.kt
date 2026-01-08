@@ -52,8 +52,8 @@ class ShippingController(
                     ))
                 }
 
-                // Get shipping options for the cart's region
-                shippingOptionRepository.findByRegionIdAndIsActiveAndDeletedAtIsNull(cart.regionId, true)
+                // Get shipping options for the cart's region (with provider eagerly loaded)
+                shippingOptionRepository.findActiveByRegionId(cart.regionId)
                     .filter { !it.isReturn } // Exclude return shipping options
                     .filter { it.isAvailable() }
             } else {
@@ -68,7 +68,7 @@ class ShippingController(
                     "id" to option.id,
                     "name" to option.name,
                     "price_type" to option.priceType.name.lowercase(),
-                    "amount" to option.amount.multiply(BigDecimal(100)).toInt(), // Convert to cents
+                    "amount" to option.amount.multiply(BigDecimal(100)).toInt(), // Convert to cents for storefront compatibility
                     "is_return" to option.isReturn,
                     "admin_only" to false, // Not tracked in current model
                     "provider_id" to option.provider?.id,

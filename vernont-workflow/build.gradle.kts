@@ -17,6 +17,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux:4.0.1")
     implementation("org.springframework.boot:spring-boot-starter-data-redis:4.0.1")
     implementation("org.springframework.boot:spring-boot-starter-actuator:4.0.1")
+    implementation("org.springframework.boot:spring-boot-starter-websocket:4.0.1")
     implementation("org.springframework:spring-context:7.0.0")
     
     // Security for password encoding

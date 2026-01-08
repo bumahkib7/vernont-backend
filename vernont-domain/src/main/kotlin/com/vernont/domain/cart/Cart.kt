@@ -84,16 +84,28 @@ class Cart : BaseEntity() {
     @Column(precision = 19, scale = 4, nullable = false)
     var discountTotal: BigDecimal = BigDecimal.ZERO
 
+    /** Applied gift card code */
+    @Column(name = "gift_card_code", length = 19)
+    var giftCardCode: String? = null
+
+    /** Gift card amount to deduct (in major currency units) */
+    @Column(name = "gift_card_total", precision = 19, scale = 4, nullable = false)
+    var giftCardTotal: BigDecimal = BigDecimal.ZERO
+
     @OneToMany(mappedBy = "cart", cascade = [CascadeType.ALL], orphanRemoval = true, fetch = FetchType.LAZY)
     var items: MutableSet<CartLineItem> = mutableSetOf()
 
-    // Shipping address embedded - all fields nullable for empty carts
     @Embedded
     @AttributeOverrides(
+        AttributeOverride(name = "firstName", column = Column(name = "first_name", nullable = true)),
+        AttributeOverride(name = "lastName", column = Column(name = "last_name", nullable = true)),
         AttributeOverride(name = "address1", column = Column(name = "address_1", nullable = true)),
+        AttributeOverride(name = "address2", column = Column(name = "address_2", nullable = true)),
         AttributeOverride(name = "city", column = Column(name = "city", nullable = true)),
         AttributeOverride(name = "countryCode", column = Column(name = "country_code", nullable = true)),
-        AttributeOverride(name = "postalCode", column = Column(name = "postal_code", nullable = true))
+        AttributeOverride(name = "province", column = Column(name = "province", nullable = true)),
+        AttributeOverride(name = "postalCode", column = Column(name = "postal_code", nullable = true)),
+        AttributeOverride(name = "phone", column = Column(name = "phone", nullable = true))
     )
     var shippingAddress: com.vernont.domain.common.Address? = null
 
@@ -138,7 +150,12 @@ class Cart : BaseEntity() {
 
     fun recalculateTotals() {
         subtotal = items.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.total) }
-        total = subtotal.add(tax).add(shipping).subtract(discount)
+        // Total = subtotal + tax + shipping - discount - gift card
+        total = subtotal.add(tax).add(shipping).subtract(discount).subtract(giftCardTotal)
+        // Ensure total doesn't go negative
+        if (total < BigDecimal.ZERO) {
+            total = BigDecimal.ZERO
+        }
     }
 
     fun clear() {

@@ -2,6 +2,18 @@ plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
     id("com.google.cloud.tools.jib") version "3.5.2"
+    id("org.flywaydb.flyway")
+}
+
+// Flyway configuration for Gradle tasks (must match application.yml defaults)
+flyway {
+    url = System.getenv("DATABASE_URL") ?: "jdbc:postgresql://localhost:5432/vernont"
+    user = System.getenv("DATABASE_USER") ?: "postgres"
+    password = System.getenv("DATABASE_PASSWORD") ?: "postgres"
+    schemas = arrayOf("public")
+    locations = arrayOf("filesystem:src/main/resources/db/migration")
+    baselineOnMigrate = true
+    validateOnMigrate = true
 }
 
 dependencies {
@@ -24,8 +36,6 @@ dependencies {
     implementation("org.springframework.security:spring-security-oauth2-resource-server:7.0.0")
     implementation("org.springframework.security:spring-security-oauth2-jose:7.0.0")
 
-    // Spring Data Elasticsearch - Re-enabled with proper Jackson 3 support
-    implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch:4.0.1")
 
     // JWT
     // https://mvnrepository.com/artifact/io.jsonwebtoken/jjwt-api
@@ -48,7 +58,7 @@ dependencies {
 
     // Database Migration
     implementation("org.flywaydb:flyway-core:11.18.0")
-    implementation("org.flywaydb:flyway-database-postgresql:10.18.0")
+    implementation("org.flywaydb:flyway-database-postgresql:11.18.0")
 
     // PostgreSQL
     runtimeOnly("org.postgresql:postgresql")
@@ -61,15 +71,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-websocket:4.0.1")
     implementation("org.springframework.boot:spring-boot-starter-batch:4.0.1")
 
-    // Elasticsearch client (Java API v9) - Updated for Jackson 3 compatibility
-    implementation("co.elastic.clients:elasticsearch-java:9.2.2") {
-        exclude(group = "commons-logging", module = "commons-logging")
-    }
-    implementation("co.elastic.clients:elasticsearch-rest5-client:9.2.2")
-    // Elasticsearch REST client - Required for the Java API client
-    implementation("org.elasticsearch.client:elasticsearch-rest-client:9.2.2") {
-        exclude(group = "commons-logging", module = "commons-logging")
-    }
+    // Spring Kafka (for Redpanda in dev, event consumption)
+    implementation("org.springframework.kafka:spring-kafka:4.0.1")
+
 
     // Kotlin
     implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -87,6 +91,9 @@ dependencies {
     // Monitoring
     implementation("org.springframework.boot:spring-boot-starter-actuator:4.0.1")
     implementation("io.micrometer:micrometer-registry-prometheus:1.14.2")
+
+    // Dotenv support - loads .env files into Spring environment
+    implementation("me.paulschwarz:spring-dotenv:4.0.0")
 
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test:4.0.1")

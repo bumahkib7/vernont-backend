@@ -1,5 +1,6 @@
 package com.vernont.workflow.flows.payment
 
+import com.vernont.application.giftcard.GiftCardOrderService
 import com.vernont.application.payment.PaymentIntentResult
 import com.vernont.application.payment.StripeService
 import com.vernont.repository.cart.CartRepository
@@ -13,6 +14,7 @@ import com.vernont.workflow.steps.createStep
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import java.math.BigDecimal
 
 private val logger = KotlinLogging.logger {}
 
@@ -22,7 +24,9 @@ private val logger = KotlinLogging.logger {}
 data class CreateStripePaymentIntentInput(
     val cartId: String,
     val email: String? = null,
-    val metadata: Map<String, String>? = null
+    val metadata: Map<String, String>? = null,
+    /** Optional gift card code to apply - reduces payment amount */
+    val giftCardCode: String? = null
 )
 
 /**
@@ -54,7 +58,8 @@ data class StripePaymentIntentResponse(
 @WorkflowTypes(input = CreateStripePaymentIntentInput::class, output = StripePaymentIntentResponse::class)
 class CreateStripePaymentIntentWorkflow(
     private val cartRepository: CartRepository,
-    private val stripeService: StripeService
+    private val stripeService: StripeService,
+    private val giftCardOrderService: GiftCardOrderService
 ) : Workflow<CreateStripePaymentIntentInput, StripePaymentIntentResponse> {
 
     override val name = WorkflowConstants.CreateStripePaymentIntent.NAME
@@ -125,14 +130,47 @@ class CreateStripePaymentIntentWorkflow(
                 }
             )
 
-            // Step 4: Create Stripe PaymentIntent
+            // Step 4: Create Stripe PaymentIntent (with gift card deduction if applicable)
             val createPaymentIntentStep = createStep<com.vernont.domain.cart.Cart, PaymentIntentResult>(
                 name = "create-stripe-payment-intent",
                 execute = { cart, ctx ->
                     logger.debug { "Creating Stripe PaymentIntent for cart: ${cart.id}" }
 
-                    // Convert cart total to Stripe amount (smallest currency unit)
-                    val stripeAmount = stripeService.toStripeAmount(cart.total)
+                    // Calculate final amount after gift card
+                    var finalTotal = cart.total
+                    var giftCardAmountCents = 0L
+
+                    // Apply gift card if provided
+                    if (!input.giftCardCode.isNullOrBlank()) {
+                        logger.info { "Validating gift card: ${input.giftCardCode}" }
+
+                        val validation = giftCardOrderService.validateGiftCard(
+                            input.giftCardCode,
+                            cart.currencyCode
+                        )
+
+                        if (!validation.valid) {
+                            throw IllegalArgumentException("Gift card error: ${validation.errorMessage}")
+                        }
+
+                        val cartTotalCents = stripeService.toStripeAmount(cart.total)
+                        giftCardAmountCents = minOf(validation.availableBalance.toLong(), cartTotalCents)
+
+                        // Calculate remaining amount to charge
+                        val remainingCents = cartTotalCents - giftCardAmountCents
+                        finalTotal = BigDecimal(remainingCents).divide(BigDecimal(100))
+
+                        logger.info {
+                            "Gift card ${validation.giftCard!!.code} will cover $giftCardAmountCents cents. " +
+                            "Remaining to charge: $remainingCents cents"
+                        }
+
+                        ctx.addMetadata("giftCardCode", input.giftCardCode)
+                        ctx.addMetadata("giftCardAmountCents", giftCardAmountCents)
+                    }
+
+                    // Convert final total to Stripe amount
+                    val stripeAmount = stripeService.toStripeAmount(finalTotal)
 
                     // Build metadata
                     val metadata = mutableMapOf(
@@ -140,7 +178,26 @@ class CreateStripePaymentIntentWorkflow(
                         "region_id" to cart.regionId
                     )
                     cart.customerId?.let { metadata["customer_id"] = it }
+                    if (giftCardAmountCents > 0) {
+                        metadata["gift_card_amount_cents"] = giftCardAmountCents.toString()
+                        metadata["gift_card_code"] = input.giftCardCode!!
+                    }
                     input.metadata?.let { metadata.putAll(it) }
+
+                    // If fully covered by gift card, skip Stripe
+                    if (stripeAmount <= 0) {
+                        logger.info { "Order fully covered by gift card - no Stripe payment needed" }
+                        val freeResult = PaymentIntentResult(
+                            paymentIntentId = "gc_covered_${System.currentTimeMillis()}",
+                            clientSecret = "",
+                            amount = 0,
+                            currencyCode = cart.currencyCode,
+                            status = "succeeded"
+                        )
+                        ctx.addMetadata("paymentIntentResult", freeResult)
+                        ctx.addMetadata("fullyCoveredByGiftCard", true)
+                        return@createStep StepResponse.of(freeResult)
+                    }
 
                     val paymentIntentResult = stripeService.createPaymentIntent(
                         amount = stripeAmount,
@@ -151,6 +208,7 @@ class CreateStripePaymentIntentWorkflow(
                     )
 
                     ctx.addMetadata("paymentIntentResult", paymentIntentResult)
+                    ctx.addMetadata("fullyCoveredByGiftCard", false)
                     logger.info {
                         "PaymentIntent created: ${paymentIntentResult.paymentIntentId} " +
                         "for amount: ${paymentIntentResult.amount} ${paymentIntentResult.currencyCode}"

@@ -1,17 +1,13 @@
 package com.vernont.infrastructure.storage
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.CopyObjectRequest
-import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
-import software.amazon.awssdk.services.s3.model.GetObjectRequest
-import software.amazon.awssdk.services.s3.model.HeadObjectRequest
-import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
-import software.amazon.awssdk.services.s3.model.NoSuchKeyException
-import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.*
 import java.io.InputStream
 import java.time.Duration
 
@@ -23,9 +19,9 @@ import java.time.Duration
 class S3StorageService(
     @Value("\${aws.s3.bucket-name:product-images}")
     private val bucketName: String,
-    @Value("\${aws.s3.region:us-east-1}")
+    @Value($$"${aws.s3.region:us-east-1}")
     private val region: String,
-    @Value("\${aws.s3.url-expiration-hours:24}")
+    @Value($$"${aws.s3.url-expiration-hours:24}")
     private val urlExpirationHours: Long,
     private val s3Client: S3Client
 ) : StorageService {
@@ -38,7 +34,9 @@ class S3StorageService(
         contentType: String,
         metadata: Map<String, String>?
     ): String {
-        val bytes = inputStream.readAllBytes()
+        val bytes = withContext(Dispatchers.IO) {
+            inputStream.readAllBytes()
+        }
         return uploadFileWithSize(key, bytes.inputStream(), contentType, bytes.size.toLong(), metadata)
     }
 
@@ -123,7 +121,7 @@ class S3StorageService(
             logger.debug("File exists in S3: s3://$bucketName/$key")
             true
 
-        } catch (e: NoSuchKeyException) {
+        } catch (_: NoSuchKeyException) {
             logger.debug("File does not exist in S3: s3://$bucketName/$key")
             false
         } catch (e: Exception) {
@@ -190,9 +188,9 @@ class S3StorageService(
     override suspend fun copyFile(sourceKey: String, destinationKey: String) {
         try {
             val copyObjectRequest = CopyObjectRequest.builder()
-                .copySource("$bucketName/$sourceKey")
-                .bucket(bucketName)
-                .key(destinationKey)
+                .sourceBucket("$bucketName/$sourceKey")
+                .destinationBucket(bucketName)
+                .destinationKey(destinationKey)
                 .build()
 
             s3Client.copyObject(copyObjectRequest)

@@ -55,6 +55,11 @@ abstract class BaseEntity {
         this.deletedBy = deletedBy
     }
 
+    fun restore() {
+        this.deletedAt = null
+        this.deletedBy = null
+    }
+
     fun isDeleted(): Boolean = deletedAt != null
 
     companion object {

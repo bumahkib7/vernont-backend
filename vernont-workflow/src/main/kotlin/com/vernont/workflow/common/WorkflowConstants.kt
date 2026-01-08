@@ -174,12 +174,27 @@ object WorkflowConstants {
     object Customer {
         const val CREATE_CUSTOMER_ACCOUNT = "customer.create-account"
         const val CREATE_CUSTOMERS = "customer.create"
+        const val SEND_EMAIL = "customer.send-email"
+        const val SEND_GIFT_CARD = "customer.send-gift-card"
+        const val RESET_PASSWORD = "customer.reset-password"
+        const val SUSPEND_CUSTOMER = "customer.suspend"
+        const val ACTIVATE_CUSTOMER = "customer.activate"
+        const val CHANGE_TIER = "customer.change-tier"
     }
     object CreateCustomerAccount {
         const val NAME = "customer.create-account"
     }
     object CreateCustomers {
         const val NAME = "customer.create"
+    }
+    object SendCustomerEmail {
+        const val NAME = "customer.send-email"
+    }
+    object SendGiftCard {
+        const val NAME = "customer.send-gift-card"
+    }
+    object ResetCustomerPassword {
+        const val NAME = "customer.reset-password"
     }
 
     object Region {

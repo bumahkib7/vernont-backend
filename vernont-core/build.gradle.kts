@@ -2,13 +2,6 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.nexus"
-version = "1.0.0"
-
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation(kotlin("stdlib"))
 

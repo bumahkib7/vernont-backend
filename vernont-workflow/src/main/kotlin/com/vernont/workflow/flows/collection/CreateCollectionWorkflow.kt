@@ -46,7 +46,7 @@ class CreateCollectionWorkflow(
         publishEvent(collection, context)
 
         logger.info { "Collection created successfully: ${collection.id}" }
-        return WorkflowResult.success(CreateCollectionOutput(collection))
+        return WorkflowResult.success(CreateCollectionOutput(CollectionDto.from(collection)))
     }
 
     private suspend fun validateInput(

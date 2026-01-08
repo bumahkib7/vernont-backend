@@ -43,8 +43,10 @@ interface ShippingOptionRepository : JpaRepository<ShippingOption, String> {
 
     fun findByIsActive(isActive: Boolean): List<ShippingOption>
 
+    @EntityGraph(value = "ShippingOption.full", type = EntityGraph.EntityGraphType.LOAD)
     fun findByIsActiveAndDeletedAtIsNull(isActive: Boolean): List<ShippingOption>
 
+    @EntityGraph(value = "ShippingOption.full", type = EntityGraph.EntityGraphType.LOAD)
     fun findByRegionIdAndIsActiveAndDeletedAtIsNull(regionId: String, isActive: Boolean): List<ShippingOption>
 
     fun findByDeletedAtIsNull(): List<ShippingOption>
