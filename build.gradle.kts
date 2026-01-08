@@ -30,12 +30,6 @@ scmVersion {
         versionSeparator.set("")
     }
 
-    // SNAPSHOT suffix for non-release builds
-    snapshotCreator { version, _ -> "${version}-SNAPSHOT" }
-
-    // Version format
-    versionCreator { versionFromTag, _ -> versionFromTag }
-
     // Hooks for CI/CD
     hooks {
         // Uncomment to auto-push tags
