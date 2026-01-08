@@ -9,7 +9,23 @@ import java.time.Instant
  * Used for historical analysis, debugging, and replay capabilities
  */
 @Entity
-@Table(name = "workflow_step_event")
+@Table(
+    name = "workflow_step_event",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uq_workflow_step_event_execution_step",
+            columnNames = ["execution_id", "step_index"]
+        )
+    ],
+    indexes = [
+        Index(name = "idx_workflow_step_event_execution", columnList = "execution_id"),
+        Index(name = "idx_workflow_step_event_workflow", columnList = "workflow_name"),
+        Index(name = "idx_workflow_step_event_started_at", columnList = "started_at"),
+        // Composite indexes for common query patterns
+        Index(name = "idx_workflow_step_event_workflow_started", columnList = "workflow_name, started_at"),
+        Index(name = "idx_workflow_step_event_workflow_status_started", columnList = "workflow_name, status, started_at")
+    ]
+)
 class WorkflowStepEvent : BaseEntity() {
 
     @Column(name = "execution_id", nullable = false, length = 36)

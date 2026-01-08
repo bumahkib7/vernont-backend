@@ -2,6 +2,7 @@ package com.vernont.workflow.flows.order
 
 import com.vernont.domain.order.Order
 import com.vernont.domain.order.OrderAddress
+import com.vernont.domain.order.dto.OrderResponse
 import com.vernont.domain.fulfillment.Fulfillment
 import com.vernont.domain.inventory.InventoryLevel
 import com.vernont.domain.payment.Payment
@@ -58,8 +59,38 @@ data class InventoryAllocation(
     val isBackorder: Boolean = false
 )
 
+/**
+ * Represents an inventory reservation for compensation purposes.
+ * Type-safe alternative to string parsing.
+ */
+data class InventoryReservation(
+    val levelId: String,
+    val quantity: Int
+)
+
+/**
+ * Compensation data for payment step rollback.
+ */
+data class PaymentCompensationData(
+    val paymentId: String,
+    val status: PaymentStatus,
+    val amount: BigDecimal
+)
+
+/**
+ * Workflow for creating an order from a cart.
+ *
+ * This workflow can be overridden in consumer projects by defining a bean with the same name:
+ * ```
+ * @Component("createOrderWorkflow")
+ * @WorkflowTypes(input = CreateOrderInput::class, output = Order::class)
+ * class CustomCreateOrderWorkflow(...) : Workflow<CreateOrderInput, Order> { ... }
+ * ```
+ *
+ * Alternatively, use WorkflowCustomizer to add hooks without full replacement.
+ */
 @Component
-@WorkflowTypes(input = CreateOrderInput::class, output = Order::class)
+@WorkflowTypes(input = CreateOrderInput::class, output = OrderResponse::class)
 class CreateOrderWorkflow(
     private val cartRepository: CartRepository,
     private val orderRepository: OrderRepository,
@@ -73,7 +104,7 @@ class CreateOrderWorkflow(
     private val eventPublisher: EventPublisher,
     private val orderEventService: OrderEventService,
     private val giftCardOrderService: GiftCardOrderService
-) : Workflow<CreateOrderInput, Order> {
+) : Workflow<CreateOrderInput, OrderResponse> {
 
     override val name = WorkflowConstants.CreateOrder.NAME
 
@@ -89,7 +120,7 @@ class CreateOrderWorkflow(
     override suspend fun execute(
         input: CreateOrderInput,
         context: WorkflowContext
-    ): WorkflowResult<Order> {
+    ): WorkflowResult<OrderResponse> {
         logger.info { "Starting enhanced order creation workflow for cart: ${input.cartId}" }
 
         try {
@@ -136,10 +167,9 @@ class CreateOrderWorkflow(
                     val calculatedTax: BigDecimal = if (cart.regionId.isNotBlank()) {
                         val region = regionRepository.findWithTaxRatesById(cart.regionId)
                         if (region != null && region.automaticTaxes) {
-                            val taxRateBigDecimal = BigDecimal.valueOf(region.taxRate.toLong())
-                            // Simple tax calculation based on region tax rate
+                            // taxRate is stored as decimal (0.18 for 18%)
                             cart.subtotal
-                                .multiply(taxRateBigDecimal)
+                                .multiply(region.taxRate)
                                 .setScale(4, RoundingMode.HALF_UP)
                         } else {
                             cart.tax
@@ -264,7 +294,7 @@ class CreateOrderWorkflow(
             )
 
             // Step 3: Reserve inventory (skip backorder allocations)
-            val reserveInventoryStep = createStep<List<InventoryAllocation>, List<String>>(
+            val reserveInventoryStep = createStep<List<InventoryAllocation>, List<InventoryReservation>>(
                 name = "reserve-inventory",
                 execute = { allocations, ctx ->
                     // Filter out backorder allocations - we can't reserve inventory that doesn't exist
@@ -277,7 +307,7 @@ class CreateOrderWorkflow(
 
                     logger.debug { "Reserving inventory for ${reservableAllocations.size} allocations" }
 
-                    val reservationIds = mutableListOf<String>()
+                    val reservations = mutableListOf<InventoryReservation>()
 
                     reservableAllocations.forEach { allocation ->
                         val level = inventoryLevelRepository.findById(allocation.inventoryLevelId).orElseThrow {
@@ -288,29 +318,29 @@ class CreateOrderWorkflow(
                         level.reserve(allocation.quantity)
                         inventoryLevelRepository.save(level)
 
-                        // Store reservation details for compensation
-                        reservationIds.add("${allocation.inventoryLevelId}:${allocation.quantity}")
+                        // Store typed reservation details for compensation
+                        reservations.add(InventoryReservation(
+                            levelId = allocation.inventoryLevelId,
+                            quantity = allocation.quantity
+                        ))
 
                         logger.debug { "Reserved ${allocation.quantity} units from level ${allocation.inventoryLevelId}" }
                     }
 
-                    ctx.addMetadata("reservations", reservationIds)
                     ctx.addMetadata("hasBackorders", backorderAllocations.isNotEmpty())
-                    StepResponse.of(reservationIds)
+                    // Return reservations as both output and compensationData for type-safe rollback
+                    StepResponse.of(reservations, compensationData = reservations)
                 },
-                compensate = { _, ctx ->
+                compensate = { _, _, compensationData, _ ->
                     @Suppress("UNCHECKED_CAST")
-                    val reservations = ctx.getMetadata("reservations") as? List<String>
-                    reservations?.forEach { reservation ->
+                    val reservations = compensationData as? List<InventoryReservation> ?: return@createStep
+                    reservations.forEach { reservation ->
                         try {
-                            val (levelId, qtyStr) = reservation.split(":")
-                            val qty = qtyStr.toInt()
-                            
-                            val level = inventoryLevelRepository.findById(levelId).orElse(null)
+                            val level = inventoryLevelRepository.findById(reservation.levelId).orElse(null)
                             if (level != null) {
-                                level.releaseReservation(qty)
+                                level.releaseReservation(reservation.quantity)
                                 inventoryLevelRepository.save(level)
-                                logger.info { "Compensated: Released reservation of $qty units from level $levelId" }
+                                logger.info { "Compensated: Released reservation of ${reservation.quantity} units from level ${reservation.levelId}" }
                             }
                         } catch (e: Exception) {
                             logger.error(e) { "Failed to compensate reservation: $reservation" }
@@ -406,45 +436,52 @@ class CreateOrderWorkflow(
                     ctx.addMetadata("totalAmount", orderTotalBeforeGiftCard)
 
                     logger.info { "Payment authorized: ${authorizedPayment.id} for amount $payableAmount (order total: $orderTotalBeforeGiftCard)" }
-                    StepResponse.of(authorizedPayment)
+
+                    // Return payment with typed compensation data
+                    StepResponse.of(
+                        authorizedPayment,
+                        compensationData = PaymentCompensationData(
+                            paymentId = authorizedPayment.id,
+                            status = authorizedPayment.status,
+                            amount = authorizedPayment.amount
+                        )
+                    )
                 },
-                compensate = { _, ctx ->
-                    val paymentId = ctx.getMetadata("paymentId") as? String
-                    if (paymentId != null) {
-                        try {
-                            val payment = paymentRepository.findById(paymentId).orElse(null)
-                            if (payment != null) {
-                                when (payment.status) {
-                                    PaymentStatus.AUTHORIZED -> {
-                                        // Cancel authorized payment
-                                        payment.cancel()
-                                        paymentRepository.save(payment)
-                                        logger.info { "Compensated: Canceled authorized payment $paymentId" }
+                compensate = { _, _, compensationData, _ ->
+                    val compData = compensationData as? PaymentCompensationData ?: return@createStep
+                    try {
+                        val payment = paymentRepository.findById(compData.paymentId).orElse(null)
+                        if (payment != null) {
+                            when (payment.status) {
+                                PaymentStatus.AUTHORIZED -> {
+                                    // Cancel authorized payment
+                                    payment.cancel()
+                                    paymentRepository.save(payment)
+                                    logger.info { "Compensated: Canceled authorized payment ${compData.paymentId}" }
+                                }
+                                PaymentStatus.CAPTURED -> {
+                                    // SECURITY: Refund captured payment - cannot just cancel
+                                    val refund = com.vernont.domain.payment.Refund().apply {
+                                        this.payment = payment
+                                        this.orderId = payment.orderId
+                                        this.currencyCode = payment.currencyCode
+                                        this.amount = payment.amount
+                                        this.reason = com.vernont.domain.payment.RefundReason.CANCEL
+                                        this.note = "Workflow compensation - order creation failed after payment capture"
+                                        this.status = com.vernont.domain.payment.RefundStatus.SUCCEEDED
                                     }
-                                    PaymentStatus.CAPTURED -> {
-                                        // SECURITY: Refund captured payment - cannot just cancel
-                                        val refund = com.vernont.domain.payment.Refund().apply {
-                                            this.payment = payment
-                                            this.orderId = payment.orderId
-                                            this.currencyCode = payment.currencyCode
-                                            this.amount = payment.amount
-                                            this.reason = com.vernont.domain.payment.RefundReason.CANCEL
-                                            this.note = "Workflow compensation - order creation failed after payment capture"
-                                            this.status = com.vernont.domain.payment.RefundStatus.SUCCEEDED
-                                        }
-                                        // Note: In production, would need RefundRepository injection
-                                        payment.status = PaymentStatus.REFUNDED
-                                        paymentRepository.save(payment)
-                                        logger.warn { "Compensated: Refunded captured payment $paymentId (requires manual verification)" }
-                                    }
-                                    else -> {
-                                        logger.debug { "Payment $paymentId in status ${payment.status} - no compensation needed" }
-                                    }
+                                    // Note: In production, would need RefundRepository injection
+                                    payment.status = PaymentStatus.REFUNDED
+                                    paymentRepository.save(payment)
+                                    logger.warn { "Compensated: Refunded captured payment ${compData.paymentId} (requires manual verification)" }
+                                }
+                                else -> {
+                                    logger.debug { "Payment ${compData.paymentId} in status ${payment.status} - no compensation needed" }
                                 }
                             }
-                        } catch (e: Exception) {
-                            logger.error(e) { "Failed to compensate payment: $paymentId" }
                         }
+                    } catch (e: Exception) {
+                        logger.error(e) { "Failed to compensate payment: ${compData.paymentId}" }
                     }
                 }
             )
@@ -637,8 +674,11 @@ class CreateOrderWorkflow(
             // Execute workflow steps
             val calculatedTax = validateAndCalculateTaxesStep.invoke(input, context).data
             val allocations = allocateInventoryStep.invoke(input.cartId, context).data
-            val reservations = reserveInventoryStep.invoke(allocations, context).data
-            val payment = authorizePaymentStep.invoke(calculatedTax, context).data
+            reserveInventoryStep.invoke(allocations, context)
+
+            val payableAmount = applyGiftCardStep.invoke(calculatedTax, context).data
+            val payment = authorizePaymentStep.invoke(payableAmount, context).data
+
             val order = createOrderStep.invoke(payment, context).data
             val fulfillments = createFulfillmentsStep.invoke(order, context).data
             fulfillInventoryStep.invoke(allocations, context)
@@ -668,8 +708,8 @@ class CreateOrderWorkflow(
                 "across ${allocations.groupBy { it.locationId }.size} location(s)" +
                 if (backorderCount > 0) " ($backorderCount item(s) on backorder)" else ""
             }
-            
-            return WorkflowResult.success(order)
+
+            return WorkflowResult.success(OrderResponse.from(order))
 
         } catch (e: Exception) {
             logger.error(e) { "Order creation workflow failed: ${e.message}" }

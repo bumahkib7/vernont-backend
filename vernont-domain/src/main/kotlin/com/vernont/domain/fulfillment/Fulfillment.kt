@@ -59,6 +59,64 @@ class Fulfillment : BaseEntity() {
     @Column(columnDefinition = "jsonb")
     var data: Map<String, Any>? = null
 
+    // ========== Shipping Label Fields (for production-safe idempotency) ==========
+
+    /**
+     * Idempotency key for label purchase (prevents double-buy on retries)
+     * Format: "label:{orderId}:{fulfillmentId}"
+     */
+    @Column(name = "label_idempotency_key", length = 100)
+    var labelIdempotencyKey: String? = null
+
+    /**
+     * External label ID from shipping provider (e.g., ShipEngine label ID)
+     */
+    @Column(name = "label_id", length = 100)
+    var labelId: String? = null
+
+    /**
+     * Current status of the shipping label
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "label_status", length = 20)
+    var labelStatus: LabelStatus = LabelStatus.NONE
+
+    /**
+     * URL to download the shipping label (PDF)
+     */
+    @Column(name = "label_url", columnDefinition = "TEXT")
+    var labelUrl: String? = null
+
+    /**
+     * Cost of the label in cents (or smallest currency unit)
+     */
+    @Column(name = "label_cost")
+    var labelCost: Long? = null
+
+    /**
+     * Carrier code (e.g., "ups", "fedex", "usps")
+     */
+    @Column(name = "carrier_code", length = 50)
+    var carrierCode: String? = null
+
+    /**
+     * Service code (e.g., "ground", "priority", "express")
+     */
+    @Column(name = "service_code", length = 50)
+    var serviceCode: String? = null
+
+    /**
+     * Error message if label void failed
+     */
+    @Column(name = "label_void_error", columnDefinition = "TEXT")
+    var labelVoidError: String? = null
+
+    /**
+     * When the label was purchased
+     */
+    @Column(name = "label_purchased_at")
+    var labelPurchasedAt: Instant? = null
+
     @Column(name = "shipped_at")
     var shippedAt: Instant? = null
 
@@ -128,5 +186,82 @@ class Fulfillment : BaseEntity() {
 
     fun getTrackingUrlsList(): List<String> {
         return trackingUrls?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+    }
+
+    // ========== Label Operations ==========
+
+    /**
+     * Generate idempotency key for label purchase
+     */
+    fun generateLabelIdempotencyKey(): String {
+        return "label:${orderId ?: "unknown"}:$id"
+    }
+
+    /**
+     * Check if label is already purchased
+     */
+    fun hasLabelPurchased(): Boolean {
+        return labelStatus == LabelStatus.PURCHASED && labelId != null
+    }
+
+    /**
+     * Check if label purchase is safe to proceed
+     */
+    fun canPurchaseLabel(): Boolean {
+        return labelStatus == LabelStatus.NONE || labelStatus == LabelStatus.VOIDED
+    }
+
+    /**
+     * Mark label as pending purchase (call before external API)
+     */
+    fun markLabelPendingPurchase(idempotencyKey: String) {
+        require(canPurchaseLabel()) { "Cannot purchase label in status: $labelStatus" }
+        this.labelIdempotencyKey = idempotencyKey
+        this.labelStatus = LabelStatus.PENDING_PURCHASE
+    }
+
+    /**
+     * Apply successful label purchase result
+     */
+    fun applyLabelPurchase(
+        labelId: String,
+        trackingNumber: String?,
+        labelUrl: String?,
+        carrier: String?,
+        service: String?,
+        costCents: Long?
+    ) {
+        this.labelId = labelId
+        this.labelStatus = LabelStatus.PURCHASED
+        this.labelUrl = labelUrl
+        this.labelCost = costCents
+        this.carrierCode = carrier
+        this.serviceCode = service
+        this.labelPurchasedAt = Instant.now()
+
+        trackingNumber?.let { addTrackingNumber(it) }
+    }
+
+    /**
+     * Mark label as successfully voided
+     */
+    fun markLabelVoided() {
+        require(labelStatus == LabelStatus.PURCHASED) { "Can only void purchased labels" }
+        this.labelStatus = LabelStatus.VOIDED
+    }
+
+    /**
+     * Mark label void as failed (requires ops attention)
+     */
+    fun markLabelVoidFailed(error: String) {
+        this.labelStatus = LabelStatus.VOID_FAILED
+        this.labelVoidError = error
+    }
+
+    /**
+     * Check if fulfillment requires ops attention for label issues
+     */
+    fun requiresLabelAttention(): Boolean {
+        return labelStatus == LabelStatus.VOID_FAILED
     }
 }

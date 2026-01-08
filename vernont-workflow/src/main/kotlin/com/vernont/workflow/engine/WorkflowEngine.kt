@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.reflect.KClass
 
 private val logger = KotlinLogging.logger {}
@@ -24,8 +25,18 @@ private val logger = KotlinLogging.logger {}
 interface Workflow<I, O> {
     val name: String
     suspend fun execute(input: I, context: WorkflowContext): WorkflowResult<O>
+
+    /**
+     * Compensate/rollback the workflow.
+     * Default implementation runs all compensations pushed onto the context's
+     * compensation stack in reverse order (saga pattern).
+     *
+     * Override this method for custom compensation logic, but call
+     * context.runCompensations() to ensure step-level compensations run.
+     */
     suspend fun compensate(context: WorkflowContext) {
-        // Default: no compensation
+        // Run step-level compensations in reverse order (saga pattern)
+        context.runCompensations()
     }
 }
 
@@ -42,8 +53,91 @@ class WorkflowContext {
     internal var eventPublisher: WorkflowEventPublisher? = null
 
     private val metadata = ConcurrentHashMap<String, Any>()
-    private val executedSteps = mutableListOf<String>()
-    private var stepIndex = 0
+    // Thread-safe for parallel step execution
+    private val executedSteps = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    // Atomic step counter - thread-safe for parallel step execution
+    private val stepCounter = AtomicInteger(0)
+
+    // Compensation stack for saga-pattern rollback (LIFO order)
+    // Thread-safe for parallel step execution
+    private val compensationStack = java.util.Collections.synchronizedList(mutableListOf<CompensationAction>())
+
+    // Guard to prevent late compensation pushes after rollback has started
+    // Uses AtomicBoolean for atomic check-and-set with synchronized block
+    private val compensating = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Push a compensation action onto the stack.
+     * Compensations are executed in reverse order (last-in, first-out).
+     * Thread-safe for parallel step execution.
+     *
+     * If compensation rollback has already started, this is a no-op to prevent
+     * late-finishing steps from pushing compensations during rollback.
+     *
+     * The check and push are synchronized together to prevent race conditions
+     * where a step pushes compensation right as rollback begins.
+     */
+    fun pushCompensation(stepName: String, action: suspend () -> Unit) {
+        synchronized(compensationStack) {
+            if (compensating.get()) {
+                logger.warn { "Ignoring compensation push for step '$stepName' - compensation already in progress" }
+                return
+            }
+            compensationStack.add(CompensationAction(stepName, action))
+        }
+        logger.debug { "Pushed compensation for step: $stepName (stack size: ${compensationStack.size})" }
+    }
+
+    /**
+     * Run all compensations in reverse order (saga rollback).
+     * Continues even if individual compensations fail.
+     * Clears the stack progressively to prevent double-compensation.
+     * Sets compensating flag atomically to prevent late pushes from concurrent steps.
+     */
+    suspend fun runCompensations() {
+        // Atomically set compensating flag inside the same lock used for pushes
+        val stackSize = synchronized(compensationStack) {
+            compensating.set(true)
+            compensationStack.size
+        }
+
+        if (stackSize == 0) {
+            logger.debug { "No compensations to run" }
+            return
+        }
+
+        logger.info { "Running $stackSize compensation(s) in reverse order" }
+
+        // Pop and execute in reverse order, clearing as we go
+        // No check-then-act race: removeLastOrNull returns null when empty
+        while (true) {
+            val compensation = synchronized(compensationStack) {
+                compensationStack.removeLastOrNull()
+            } ?: break
+
+            try {
+                logger.info { "Compensating step: ${compensation.stepName}" }
+                compensation.action.invoke()
+                logger.info { "Compensation succeeded for step: ${compensation.stepName}" }
+            } catch (e: Exception) {
+                // Log and continue - don't let one failed compensation stop others
+                logger.error(e) { "Compensation failed for step: ${compensation.stepName}" }
+            }
+        }
+
+        logger.info { "Compensation run complete" }
+    }
+
+    /**
+     * Check if there are pending compensations
+     */
+    fun hasCompensations(): Boolean = synchronized(compensationStack) { compensationStack.isNotEmpty() }
+
+    /**
+     * Check if compensation rollback is in progress
+     */
+    fun isCompensating(): Boolean = compensating.get()
 
     fun addMetadata(key: String, value: Any) {
         metadata[key] = value
@@ -59,10 +153,12 @@ class WorkflowContext {
     }
 
     /**
-     * Record step start with event publishing
+     * Record step start with event publishing.
+     * Returns the assigned step index for threading through to complete/failed.
+     * Thread-safe: uses AtomicInteger for index assignment.
      */
-    fun recordStepStart(stepName: String, input: Any?, totalSteps: Int = 0) {
-        stepIndex = executedSteps.size
+    fun recordStepStart(stepName: String, input: Any?, totalSteps: Int = 0): Int {
+        val stepIndex = stepCounter.getAndIncrement()
         eventPublisher?.publishStepStarted(
             executionId = executionId ?: "",
             workflowName = workflowName ?: "",
@@ -72,12 +168,14 @@ class WorkflowContext {
             input = input,
             correlationId = correlationId
         )
+        return stepIndex
     }
 
     /**
-     * Record step completion with event publishing
+     * Record step completion with event publishing.
+     * @param stepIndex The index returned from recordStepStart
      */
-    fun recordStepComplete(stepName: String, output: Any?, durationMs: Long, totalSteps: Int = 0) {
+    fun recordStepComplete(stepName: String, stepIndex: Int, output: Any?, durationMs: Long, totalSteps: Int = 0) {
         executedSteps.add(stepName)
         eventPublisher?.publishStepCompleted(
             executionId = executionId ?: "",
@@ -92,9 +190,10 @@ class WorkflowContext {
     }
 
     /**
-     * Record step failure with event publishing
+     * Record step failure with event publishing.
+     * @param stepIndex The index returned from recordStepStart
      */
-    fun recordStepFailed(stepName: String, error: Throwable, durationMs: Long, totalSteps: Int = 0) {
+    fun recordStepFailed(stepName: String, stepIndex: Int, error: Throwable, durationMs: Long, totalSteps: Int = 0) {
         eventPublisher?.publishStepFailed(
             executionId = executionId ?: "",
             workflowName = workflowName ?: "",
@@ -107,9 +206,9 @@ class WorkflowContext {
         )
     }
 
-    fun getExecutedSteps(): List<String> = executedSteps.toList()
+    fun getExecutedSteps(): List<String> = synchronized(executedSteps) { executedSteps.toList() }
 
-    fun getCurrentStepIndex(): Int = stepIndex
+    fun getCurrentStepCount(): Int = stepCounter.get()
 }
 
 /**
@@ -156,7 +255,7 @@ class WorkflowEngine(
     private val redisTemplate: StringRedisTemplate,
     private val meterRegistry: MeterRegistry,
     private val workflowEventPublisher: WorkflowEventPublisher,
-    @Value("\${app.workflow.default-timeout-seconds:300000}")
+    @Value("\${app.workflow.default-timeout-seconds:300}")
     private val defaultTimeoutSeconds: Long,
     @Value("\${app.workflow.lock-timeout-seconds:60}")
     private val lockTimeoutSeconds: Long,
@@ -621,6 +720,14 @@ data class WorkflowInfo(
 
 // Exceptions
 class WorkflowNotFoundException(message: String) : Exception(message)
-class WorkflowTypeException(message: String) : Exception(message) 
+class WorkflowTypeException(message: String) : Exception(message)
 class WorkflowLockException(message: String) : Exception(message)
 class WorkflowTimeoutException(message: String) : Exception(message)
+
+/**
+ * Represents a compensation action to be executed during rollback
+ */
+data class CompensationAction(
+    val stepName: String,
+    val action: suspend () -> Unit
+)

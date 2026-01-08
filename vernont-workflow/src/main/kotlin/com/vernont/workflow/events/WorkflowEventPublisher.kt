@@ -5,11 +5,13 @@ import com.fasterxml.jackson.annotation.ObjectIdGenerators
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.vernont.infrastructure.messaging.MessagingService
+import com.vernont.workflow.domain.StepEventStatus
 import com.vernont.workflow.domain.WorkflowStepEvent
 import com.vernont.workflow.repository.WorkflowStepEventRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.annotation.PostConstruct
 import org.springframework.messaging.simp.SimpMessagingTemplate
+import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
 
@@ -169,8 +171,9 @@ class WorkflowEventPublisher(
         correlationId: String? = null
     ) {
         val serializedInput = serializeData(input)
+        val key = stepKey(executionId, stepIndex)
 
-        // Persist step event to database
+        // Persist step event to database (idempotent - handles duplicate inserts)
         try {
             val stepEvent = WorkflowStepEvent.create(
                 executionId = executionId,
@@ -181,8 +184,27 @@ class WorkflowEventPublisher(
                 inputData = serializedInput
             )
             stepEventRepository.save(stepEvent)
-            inProgressSteps[stepKey(executionId, stepIndex)] = stepEvent
+            inProgressSteps[key] = stepEvent
             logger.debug { "Persisted step started event: $workflowName/$stepName (execution=$executionId)" }
+        } catch (e: org.springframework.dao.DataIntegrityViolationException) {
+            // Check if this is specifically our unique constraint violation
+            val isUniqueConstraintViolation = e.message?.contains("uq_workflow_step_event_execution_step") == true
+                    || e.cause?.message?.contains("uq_workflow_step_event_execution_step") == true
+                    || e.rootCause?.message?.contains("uq_workflow_step_event_execution_step") == true
+
+            if (isUniqueConstraintViolation) {
+                // Idempotent: row already exists (e.g., retry scenario or multi-node race)
+                val existingEvent = stepEventRepository.findByExecutionIdAndStepIndex(executionId, stepIndex)
+                if (existingEvent != null) {
+                    inProgressSteps[key] = existingEvent
+                    logger.info { "Step event already exists (idempotent): $workflowName/$stepName (execution=$executionId)" }
+                } else {
+                    logger.warn(e) { "Unique constraint violation but row not found: $key" }
+                }
+            } else {
+                // Different integrity violation - don't swallow it
+                logger.error(e) { "Unexpected data integrity violation for step event: $key" }
+            }
         } catch (e: Exception) {
             logger.warn(e) { "Failed to persist step started event to database" }
         }
@@ -214,13 +236,43 @@ class WorkflowEventPublisher(
         // Update persisted step event
         try {
             val key = stepKey(executionId, stepIndex)
-            val stepEvent = inProgressSteps.remove(key)
+            var stepEvent = inProgressSteps.remove(key)
+
+            // Fallback: if in-memory tracking missed (e.g., after restart), lookup from DB
+            if (stepEvent == null) {
+                stepEvent = stepEventRepository.findByExecutionIdAndStepIndex(executionId, stepIndex)
+                if (stepEvent != null) {
+                    logger.info { "Fallback DB lookup for step completion: $workflowName/$stepName (execution=$executionId)" }
+                }
+            }
+
             if (stepEvent != null) {
-                stepEvent.markCompleted(serializedOutput, durationMs)
-                stepEventRepository.save(stepEvent)
-                logger.debug { "Persisted step completed event: $workflowName/$stepName (execution=$executionId)" }
+                // Idempotent: first terminal state wins
+                when (stepEvent.status) {
+                    StepEventStatus.RUNNING -> {
+                        stepEvent.markCompleted(serializedOutput, durationMs)
+                        try {
+                            stepEventRepository.saveAndFlush(stepEvent)
+                            logger.debug { "Persisted step completed event: $workflowName/$stepName (execution=$executionId)" }
+                        } catch (e: ObjectOptimisticLockingFailureException) {
+                            // Lost race to another writer - first terminal state wins
+                            val latest = stepEventRepository.findByExecutionIdAndStepIndex(executionId, stepIndex)
+                            when (latest?.status) {
+                                StepEventStatus.COMPLETED -> logger.info { "Step already completed (optimistic race): $workflowName/$stepName (execution=$executionId)" }
+                                StepEventStatus.FAILED -> logger.warn { "COMPLETED lost to FAILED (optimistic race): $workflowName/$stepName (execution=$executionId)" }
+                                else -> logger.warn(e) { "Optimistic lock on completion but latest state unknown: $key" }
+                            }
+                        }
+                    }
+                    StepEventStatus.COMPLETED -> {
+                        logger.info { "Step already completed (idempotent): $workflowName/$stepName (execution=$executionId)" }
+                    }
+                    StepEventStatus.FAILED -> {
+                        logger.warn { "Received COMPLETED for already FAILED step (anomaly): $workflowName/$stepName (execution=$executionId)" }
+                    }
+                }
             } else {
-                logger.warn { "No in-progress step event found for completion: $key" }
+                logger.warn { "No step event found for completion (in-memory or DB): $key" }
             }
         } catch (e: Exception) {
             logger.warn(e) { "Failed to persist step completed event to database" }
@@ -252,13 +304,43 @@ class WorkflowEventPublisher(
         // Update persisted step event
         try {
             val key = stepKey(executionId, stepIndex)
-            val stepEvent = inProgressSteps.remove(key)
+            var stepEvent = inProgressSteps.remove(key)
+
+            // Fallback: if in-memory tracking missed (e.g., after restart), lookup from DB
+            if (stepEvent == null) {
+                stepEvent = stepEventRepository.findByExecutionIdAndStepIndex(executionId, stepIndex)
+                if (stepEvent != null) {
+                    logger.info { "Fallback DB lookup for step failure: $workflowName/$stepName (execution=$executionId)" }
+                }
+            }
+
             if (stepEvent != null) {
-                stepEvent.markFailed(error.message, error::class.simpleName, durationMs)
-                stepEventRepository.save(stepEvent)
-                logger.debug { "Persisted step failed event: $workflowName/$stepName (execution=$executionId)" }
+                // Idempotent: first terminal state wins
+                when (stepEvent.status) {
+                    StepEventStatus.RUNNING -> {
+                        stepEvent.markFailed(error.message, error::class.simpleName, durationMs)
+                        try {
+                            stepEventRepository.saveAndFlush(stepEvent)
+                            logger.debug { "Persisted step failed event: $workflowName/$stepName (execution=$executionId)" }
+                        } catch (e: ObjectOptimisticLockingFailureException) {
+                            // Lost race to another writer - first terminal state wins
+                            val latest = stepEventRepository.findByExecutionIdAndStepIndex(executionId, stepIndex)
+                            when (latest?.status) {
+                                StepEventStatus.FAILED -> logger.info { "Step already failed (optimistic race): $workflowName/$stepName (execution=$executionId)" }
+                                StepEventStatus.COMPLETED -> logger.warn { "FAILED lost to COMPLETED (optimistic race): $workflowName/$stepName (execution=$executionId)" }
+                                else -> logger.warn(e) { "Optimistic lock on failure but latest state unknown: $key" }
+                            }
+                        }
+                    }
+                    StepEventStatus.FAILED -> {
+                        logger.info { "Step already failed (idempotent): $workflowName/$stepName (execution=$executionId)" }
+                    }
+                    StepEventStatus.COMPLETED -> {
+                        logger.warn { "Received FAILED for already COMPLETED step (anomaly): $workflowName/$stepName (execution=$executionId)" }
+                    }
+                }
             } else {
-                logger.warn { "No in-progress step event found for failure: $key" }
+                logger.warn { "No step event found for failure (in-memory or DB): $key" }
             }
         } catch (e: Exception) {
             logger.warn(e) { "Failed to persist step failed event to database" }
