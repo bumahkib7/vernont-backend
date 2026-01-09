@@ -69,7 +69,7 @@ class SqsMessagingService(
 
     private fun getQueueUrl(topic: String): String {
         // Map topic names to SQS queue URLs from configuration
-        return messagingProperties.sqsQueueUrls[topic]
+        return messagingProperties.getEffectiveQueueUrls()[topic]
             ?: throw IllegalArgumentException("No SQS queue URL configured for topic: $topic")
     }
 }

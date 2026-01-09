@@ -268,6 +268,18 @@ shipengine:
     country-code: ${SHIPENGINE_FROM_COUNTRY:US}
     phone: ${SHIPENGINE_FROM_PHONE:+1 555 555 5555}
 
+# Messaging Configuration
+messaging:
+  provider: ${MESSAGING_PROVIDER:kafka}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    consumer-group-id: ${KAFKA_CONSUMER_GROUP_ID:vernont-inventory-consumer}
+  sqs:
+    region: ${MESSAGING_SQS_REGION:eu-north-1}
+    orders-queue-url: ${SQS_ORDERS_QUEUE_URL:}
+    notifications-queue-url: ${SQS_NOTIFICATIONS_QUEUE_URL:}
+    workflow-events-queue-url: ${SQS_WORKFLOW_EVENTS_QUEUE_URL:}
+
 logging:
   level:
     root: ${LOG_ROOT_LEVEL:INFO}
