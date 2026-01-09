@@ -48,6 +48,7 @@ dependencies {
 
     // Spring JMS + Amazon SQS JMS integration
     implementation("org.springframework:spring-jms:6.2.2")
+    implementation("com.amazonaws:aws-java-sdk-sqs:1.12.632")
     implementation("com.amazonaws:amazon-sqs-java-messaging-lib:2.1.3")
     implementation("jakarta.jms:jakarta.jms-api:3.1.0")
 

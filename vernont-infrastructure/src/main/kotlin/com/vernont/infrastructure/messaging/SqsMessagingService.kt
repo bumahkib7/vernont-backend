@@ -1,23 +1,24 @@
 package com.vernont.infrastructure.messaging
 
+import com.amazonaws.services.sqs.AmazonSQS
+import com.amazonaws.services.sqs.model.MessageAttributeValue
+import com.amazonaws.services.sqs.model.SendMessageRequest
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
-import software.amazon.awssdk.services.sqs.SqsClient
-import software.amazon.awssdk.services.sqs.model.MessageAttributeValue
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest
 
 private val logger = KotlinLogging.logger {}
 
 /**
  * AWS SQS implementation of MessagingService.
- * Used in production environment.
+ * Uses AWS SDK v1 with AmazonSQS client.
  */
 @Service
 @ConditionalOnProperty(name = ["messaging.provider"], havingValue = "sqs")
 class SqsMessagingService(
-    private val sqsClient: SqsClient,
+    private val amazonSQSClient: AmazonSQS,
     private val objectMapper: ObjectMapper,
     private val messagingProperties: MessagingProperties
 ) : MessagingService {
@@ -36,30 +37,29 @@ class SqsMessagingService(
         try {
             val queueUrl = getQueueUrl(topic)
 
-            val requestBuilder = SendMessageRequest.builder()
-                .queueUrl(queueUrl)
-                .messageBody(payload)
+            val request = SendMessageRequest()
+                .withQueueUrl(queueUrl)
+                .withMessageBody(payload)
 
             // Add message group ID for FIFO queues (based on key)
             if (queueUrl.endsWith(".fifo") && key != null) {
-                requestBuilder.messageGroupId(key)
-                requestBuilder.messageDeduplicationId("${key}-${System.currentTimeMillis()}")
+                request.withMessageGroupId(key)
+                request.withMessageDeduplicationId("${key}-${System.currentTimeMillis()}")
             }
 
             // Add message attributes
             if (key != null) {
-                requestBuilder.messageAttributes(
+                request.withMessageAttributes(
                     mapOf(
-                        "partitionKey" to MessageAttributeValue.builder()
-                            .dataType("String")
-                            .stringValue(key)
-                            .build()
+                        "partitionKey" to MessageAttributeValue()
+                            .withDataType("String")
+                            .withStringValue(key)
                     )
                 )
             }
 
-            val response = sqsClient.sendMessage(requestBuilder.build())
-            logger.debug { "Published to SQS queue $topic, messageId=${response.messageId()}" }
+            val result = amazonSQSClient.sendMessage(request)
+            logger.debug { "Published to SQS queue $topic, messageId=${result.messageId}" }
 
         } catch (e: Exception) {
             logger.error(e) { "Error publishing to SQS queue $topic: ${e.message}" }
@@ -70,6 +70,6 @@ class SqsMessagingService(
     private fun getQueueUrl(topic: String): String {
         // Map topic names to SQS queue URLs from configuration
         return messagingProperties.getEffectiveQueueUrls()[topic]
-            ?: throw IllegalArgumentException("No SQS queue URL configured for topic: $topic")
+            ?: amazonSQSClient.getQueueUrl(topic).queueUrl
     }
 }

@@ -53,7 +53,7 @@ data class KafkaProperties(
 )
 
 data class SqsProperties(
-    val region: String = "eu-west-2",
+    val region: String = "eu-north-1",
     val endpoint: String? = null, // For LocalStack in tests
     val maxNumberOfMessages: Int = 10,
     val waitTimeSeconds: Int = 20,
