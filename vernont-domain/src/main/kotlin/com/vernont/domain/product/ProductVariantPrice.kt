@@ -32,7 +32,7 @@ class ProductVariantPrice : BaseEntity() {
     @Column(nullable = false, precision = 19, scale = 4)
     var amount: BigDecimal = BigDecimal.ZERO
 
-    @Column(name = "compareatprice", precision = 19, scale = 4)
+    @Column(name = "compare_at_price", precision = 19, scale = 4)
     var compareAtPrice: BigDecimal? = null
 
     @Column
