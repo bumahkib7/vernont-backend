@@ -32,8 +32,6 @@ data class MessagingProperties(
 ) {
     /**
      * Build effective queue URLs map from both explicit config and individual env vars.
-     * Only essential queues (orders, notifications) need to be configured.
-     * Non-critical topics (workflow-events, etc.) gracefully degrade if not configured.
      */
     fun getEffectiveQueueUrls(): Map<String, String> {
         val urls = sqsQueueUrls.toMutableMap()
@@ -41,6 +39,7 @@ data class MessagingProperties(
         // Add from individual SQS properties if configured
         sqs.ordersQueueUrl?.let { urls["orders"] = it }
         sqs.notificationsQueueUrl?.let { urls["notifications"] = it }
+        sqs.workflowEventsQueueUrl?.let { urls["workflow-events"] = it }
 
         return urls
     }
@@ -60,7 +59,8 @@ data class SqsProperties(
     val waitTimeSeconds: Int = 20,
     val visibilityTimeout: Int = 30,
 
-    // Individual queue URLs for essential queues (easier env var binding)
+    // Individual queue URLs (easier env var binding)
     val ordersQueueUrl: String? = null,
-    val notificationsQueueUrl: String? = null
+    val notificationsQueueUrl: String? = null,
+    val workflowEventsQueueUrl: String? = null
 )

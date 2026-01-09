@@ -36,11 +36,6 @@ class SqsMessagingService(
         try {
             val queueUrl = getQueueUrl(topic)
 
-            if (queueUrl == null) {
-                logger.debug { "Skipping publish to topic '$topic' - no SQS queue configured" }
-                return
-            }
-
             val requestBuilder = SendMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .messageBody(payload)
@@ -72,9 +67,9 @@ class SqsMessagingService(
         }
     }
 
-    private fun getQueueUrl(topic: String): String? {
+    private fun getQueueUrl(topic: String): String {
         // Map topic names to SQS queue URLs from configuration
-        // Returns null if not configured (graceful degradation for non-critical topics)
         return messagingProperties.getEffectiveQueueUrls()[topic]
+            ?: throw IllegalArgumentException("No SQS queue URL configured for topic: $topic")
     }
 }
