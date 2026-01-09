@@ -235,8 +235,8 @@ class FulfillOrderWorkflow(
                         fulfillmentProviderRepository.findByIdAndDeletedAtIsNull(inp.providerId)
                             ?: throw IllegalArgumentException("Fulfillment provider not found: ${inp.providerId}")
                     } else {
-                        // Get or create default manual provider
-                        var defaultProvider = fulfillmentProviderRepository.findByNameAndDeletedAtIsNull(DEFAULT_PROVIDER_NAME)
+                        // Get or create default manual provider - use providerId for lookup since that has the unique constraint
+                        var defaultProvider = fulfillmentProviderRepository.findByProviderIdAndDeletedAtIsNull(DEFAULT_PROVIDER_NAME)
                         if (defaultProvider == null) {
                             logger.info { "Creating default fulfillment provider: $DEFAULT_PROVIDER_NAME" }
                             defaultProvider = FulfillmentProvider()
@@ -326,6 +326,11 @@ class FulfillOrderWorkflow(
                     logger.debug { "Updating order fulfillment status: ${order.id}" }
 
                     order.fulfillmentStatus = FulfillmentStatus.FULFILLED
+
+                    // Update shippedQuantity on all line items so returns work properly
+                    order.items.filter { it.deletedAt == null }.forEach { item ->
+                        item.shippedQuantity = item.quantity
+                    }
 
                     val savedOrder = orderRepository.save(order)
                     ctx.addMetadata("orderUpdated", true)
@@ -711,6 +716,11 @@ class ShipOrderWorkflow(
                     logger.debug { "Updating order status: ${order.id}" }
 
                     order.fulfillmentStatus = FulfillmentStatus.SHIPPED
+
+                    // Update shippedQuantity on all line items so returns work properly
+                    order.items.filter { it.deletedAt == null }.forEach { item ->
+                        item.shippedQuantity = item.quantity
+                    }
 
                     val savedOrder = orderRepository.save(order)
 

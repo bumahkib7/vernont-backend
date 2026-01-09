@@ -3,6 +3,7 @@ package com.vernont.workflow.flows.cart
 import com.vernont.domain.cart.Cart
 import com.vernont.domain.payment.Payment
 import com.vernont.domain.payment.PaymentSession
+import com.vernont.domain.payment.dto.PaymentResponse
 import com.vernont.domain.payment.PaymentSessionStatus
 import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.payment.PaymentRepository
@@ -51,12 +52,12 @@ data class RefreshPaymentCollectionForCartInput(
  * @see https://docs.medusajs.com/api/store#carts_postcartsidpaymentcollectionsrefresh
  */
 @Component
-@WorkflowTypes(input = RefreshPaymentCollectionForCartInput::class, output = Payment::class)
+@WorkflowTypes(input = RefreshPaymentCollectionForCartInput::class, output = PaymentResponse::class)
 class RefreshPaymentCollectionForCartWorkflow(
     private val cartRepository: CartRepository,
     private val paymentRepository: PaymentRepository,
     private val paymentSessionRepository: PaymentSessionRepository
-) : Workflow<RefreshPaymentCollectionForCartInput, Payment> {
+) : Workflow<RefreshPaymentCollectionForCartInput, PaymentResponse> {
 
     override val name = "refresh-payment-collection-for-cart"
 
@@ -64,7 +65,7 @@ class RefreshPaymentCollectionForCartWorkflow(
     override suspend fun execute(
         input: RefreshPaymentCollectionForCartInput,
         context: WorkflowContext
-    ): WorkflowResult<Payment> {
+    ): WorkflowResult<PaymentResponse> {
         logger.info { "Starting refresh payment collection workflow for cart: ${input.cartId}" }
 
         try {
@@ -277,7 +278,7 @@ class RefreshPaymentCollectionForCartWorkflow(
                 "payment: ${payment.id}, total changed: $totalChanged"
             }
 
-            return WorkflowResult.success(updatedPayment)
+            return WorkflowResult.success(PaymentResponse.from(updatedPayment))
 
         } catch (e: Exception) {
             logger.error(e) { "Refresh payment collection workflow failed: ${e.message}" }

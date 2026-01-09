@@ -333,8 +333,8 @@ class ShippingTxService(
                 quantityToShip = item.quantity,
                 currentShippedQuantity = orderLineItem.shippedQuantity,
                 newShippedQuantity = orderLineItem.shippedQuantity + item.quantity,
-                title = fulfillmentItem.title,
-                sku = fulfillmentItem.sku
+                title = fulfillmentItem.title ?: orderLineItem.title,
+                sku = fulfillmentItem.sku ?: orderLineItem.variantId ?: ""
             )
         }
     }

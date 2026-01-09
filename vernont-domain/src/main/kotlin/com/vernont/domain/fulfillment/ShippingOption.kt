@@ -3,6 +3,8 @@ package com.vernont.domain.fulfillment
 import com.vernont.domain.common.BaseEntity
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.math.BigDecimal
 
 @Entity
@@ -65,9 +67,11 @@ class ShippingOption : BaseEntity() {
     @Column(name = "is_active", nullable = false)
     var isActive: Boolean = true
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     var requirements: MutableMap<String, Any>? = null
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     var data: MutableMap<String, Any>? = null
 

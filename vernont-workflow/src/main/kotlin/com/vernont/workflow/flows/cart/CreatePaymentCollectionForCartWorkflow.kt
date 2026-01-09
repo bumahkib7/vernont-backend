@@ -3,6 +3,7 @@ package com.vernont.workflow.flows.cart
 import com.vernont.domain.cart.Cart
 import com.vernont.domain.payment.Payment
 import com.vernont.domain.payment.PaymentStatus
+import com.vernont.domain.payment.dto.PaymentResponse
 import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.payment.PaymentRepository
 import com.vernont.workflow.engine.Workflow
@@ -47,11 +48,11 @@ data class CreatePaymentCollectionForCartInput(
  * @see https://docs.medusajs.com/api/store#payment-collections_postpaymentcollections
  */
 @Component
-@WorkflowTypes(input = CreatePaymentCollectionForCartInput::class, output = Payment::class)
+@WorkflowTypes(input = CreatePaymentCollectionForCartInput::class, output = PaymentResponse::class)
 class CreatePaymentCollectionForCartWorkflow(
     private val cartRepository: CartRepository,
     private val paymentRepository: PaymentRepository
-) : Workflow<CreatePaymentCollectionForCartInput, Payment> {
+) : Workflow<CreatePaymentCollectionForCartInput, PaymentResponse> {
 
     override val name = WorkflowConstants.CreatePaymentCollectionForCart.NAME
 
@@ -59,7 +60,7 @@ class CreatePaymentCollectionForCartWorkflow(
     override suspend fun execute(
         input: CreatePaymentCollectionForCartInput,
         context: WorkflowContext
-    ): WorkflowResult<Payment> {
+    ): WorkflowResult<PaymentResponse> {
         logger.info { "Starting create payment collection workflow for cart: ${input.cartId}" }
 
         try {
@@ -218,7 +219,7 @@ class CreatePaymentCollectionForCartWorkflow(
                 "payment: ${payment.id}, amount: ${payment.amount}"
             }
 
-            return WorkflowResult.success(payment)
+            return WorkflowResult.success(PaymentResponse.from(payment))
 
         } catch (e: Exception) {
             logger.error(e) { "Create payment collection workflow failed: ${e.message}" }

@@ -3,6 +3,8 @@ package com.vernont.domain.fulfillment
 import com.vernont.domain.common.BaseEntity
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 
 @Entity
 @Table(
@@ -28,6 +30,7 @@ class FulfillmentProvider : BaseEntity() {
     @Column(name = "is_active", nullable = false)
     var isActive: Boolean = true
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     var config: MutableMap<String, Any>? = null
 

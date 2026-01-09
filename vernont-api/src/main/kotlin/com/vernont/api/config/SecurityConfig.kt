@@ -212,10 +212,6 @@ class SecurityConfig(
                             .requestMatchers("/api/meta/**")
                             .permitAll()
 
-                            // WebSocket/SockJS handshake
-                            .requestMatchers("/ws/**")
-                            .permitAll()
-
                             // Health checks and monitoring
                             .requestMatchers("/actuator/health", "/actuator/health/**")
                             .permitAll()

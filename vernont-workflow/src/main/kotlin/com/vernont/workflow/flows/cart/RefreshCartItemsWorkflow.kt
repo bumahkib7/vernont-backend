@@ -2,6 +2,7 @@ package com.vernont.workflow.flows.cart
 
 import com.vernont.domain.cart.Cart
 import com.vernont.domain.cart.CartLineItem
+import com.vernont.domain.cart.dto.CartResponse
 import com.vernont.domain.pricing.PriceSet
 import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.product.ProductVariantRepository
@@ -65,12 +66,12 @@ data class RefreshCartItemsInput(
  * )
  */
 @Component
-@WorkflowTypes(input = RefreshCartItemsInput::class, output = Cart::class)
+@WorkflowTypes(input = RefreshCartItemsInput::class, output = CartResponse::class)
 class RefreshCartItemsWorkflow(
     private val cartRepository: CartRepository,
     private val productVariantRepository: ProductVariantRepository,
     private val priceSetRepository: PriceSetRepository
-) : Workflow<RefreshCartItemsInput, Cart> {
+) : Workflow<RefreshCartItemsInput, CartResponse> {
 
     override val name = WorkflowConstants.RefreshCartItems.NAME
 
@@ -78,7 +79,7 @@ class RefreshCartItemsWorkflow(
     override suspend fun execute(
         input: RefreshCartItemsInput,
         context: WorkflowContext
-    ): WorkflowResult<Cart> {
+    ): WorkflowResult<CartResponse> {
         logger.info { "Starting refresh cart items workflow for cart: ${input.cartId}" }
 
         try {
@@ -283,7 +284,7 @@ class RefreshCartItemsWorkflow(
 
             logger.info { "Refresh cart items workflow completed successfully for cart: ${refreshedCart.id}" }
 
-            return WorkflowResult.success(refreshedCart)
+            return WorkflowResult.success(CartResponse.from(refreshedCart))
 
         } catch (e: Exception) {
             logger.error(e) { "Refresh cart items workflow failed: ${e.message}" }

@@ -13,6 +13,8 @@ interface FulfillmentProviderRepository : JpaRepository<FulfillmentProvider, Str
 
     fun findByNameAndDeletedAtIsNull(name: String): FulfillmentProvider?
 
+    fun findByProviderIdAndDeletedAtIsNull(providerId: String): FulfillmentProvider?
+
     fun findByIdAndDeletedAtIsNull(id: String): FulfillmentProvider?
 
     fun findByDeletedAtIsNull(): List<FulfillmentProvider>

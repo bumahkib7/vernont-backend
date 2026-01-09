@@ -23,6 +23,8 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -228,10 +230,13 @@ class AuthController(
 
                                         // Link any guest orders (orders placed before registration) to this customer
                                         try {
-                                                val linkedOrders = orderService.linkGuestOrdersToCustomer(
-                                                        customerId = customer.id,
-                                                        email = customer.email
-                                                )
+                                                val linkedOrders =
+                                                    withContext(Dispatchers.IO) {
+                                                        orderService.linkGuestOrdersToCustomer(
+                                                            customerId = customer.id,
+                                                            email = customer.email
+                                                        )
+                                                    }
                                                 if (linkedOrders > 0) {
                                                         logger.info { "Linked $linkedOrders guest orders to newly registered customer: ${customer.id}" }
                                                 }
@@ -830,7 +835,7 @@ class AuthController(
                                 tokenInfo.picture?.let { user.avatarUrl = it }
                                 user.emailVerified = user.emailVerified || tokenInfo.emailVerified
 
-                                val metadata = user.metadata ?: mutableMapOf<String, Any?>()
+                                val metadata = user.metadata ?: mutableMapOf()
                                 metadata["googleSub"] = googleSub
                                 metadata["googlePicture"] = tokenInfo.picture
                                 user.metadata = metadata

@@ -5,6 +5,7 @@ import com.vernont.domain.inventory.InventoryReservation
 import com.vernont.domain.order.Order
 import com.vernont.domain.order.OrderLineItem
 import com.vernont.domain.order.OrderStatus
+import com.vernont.domain.order.dto.OrderResponse
 import com.vernont.domain.payment.Payment
 import com.vernont.domain.payment.PaymentStatus
 import com.vernont.repository.cart.CartRepository
@@ -53,10 +54,16 @@ data class CompleteCartInput(
  * 9. Link order to payment
  * 10. Emit OrderPlaced event
  *
+ * To override this workflow in a consumer project, define your own bean with the same name:
+ * ```
+ * @Component("completeCartWorkflow")
+ * class CustomCompleteCartWorkflow(...) : Workflow<CompleteCartInput, Order> { ... }
+ * ```
+ *
  * @see https://docs.medusajs.com/api/store#carts_postcartsidcomplete
  */
 @Component
-@WorkflowTypes(input = CompleteCartInput::class, output = Order::class)
+@WorkflowTypes(input = CompleteCartInput::class, output = OrderResponse::class)
 class CompleteCartWorkflow(
     private val cartRepository: CartRepository,
     private val orderRepository: OrderRepository,
@@ -65,7 +72,7 @@ class CompleteCartWorkflow(
     private val inventoryItemRepository: InventoryItemRepository,
     private val inventoryLevelRepository: InventoryLevelRepository,
     private val inventoryReservationRepository: InventoryReservationRepository
-) : Workflow<CompleteCartInput, Order> {
+) : Workflow<CompleteCartInput, OrderResponse> {
 
     override val name = WorkflowConstants.CompleteCart.NAME
 
@@ -73,7 +80,7 @@ class CompleteCartWorkflow(
     override suspend fun execute(
         input: CompleteCartInput,
         context: WorkflowContext
-    ): WorkflowResult<Order> {
+    ): WorkflowResult<OrderResponse> {
         logger.info { "Starting complete cart workflow for cart: ${input.cartId}" }
 
         try {
@@ -271,7 +278,7 @@ class CompleteCartWorkflow(
             linkOrderToPaymentStep.invoke(order, context)
 
             logger.info { "Cart completion succeeded: ${cart.id} -> order: ${order.id}" }
-            return WorkflowResult.success(order)
+            return WorkflowResult.success(OrderResponse.from(order))
 
         } catch (e: Exception) {
             logger.error(e) { "Complete cart workflow failed: ${e.message}" }

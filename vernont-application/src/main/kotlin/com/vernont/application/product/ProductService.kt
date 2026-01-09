@@ -106,7 +106,7 @@ class ProductService(
         request.images?.forEach { imageRequest ->
             val shouldUpload = isUploadCandidate(imageRequest.url)
             val imageUrl = uploadIfDataUrl(imageRequest.url, saved.id)
-                ?: if (shouldUpload) return@forEach else imageRequest.url ?: return@forEach
+                ?: if (shouldUpload) return@forEach else imageRequest.url
             val image = ProductImage().apply {
                 url = imageUrl
                 altText = imageRequest.altText

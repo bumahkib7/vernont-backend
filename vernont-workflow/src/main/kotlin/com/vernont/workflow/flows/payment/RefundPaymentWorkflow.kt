@@ -190,15 +190,13 @@ class RefundPaymentWorkflow(
 
                     // Store provider refund ID
                     refundResult.providerData?.let { providerData ->
-                        val dataMap = mutableMapOf<String, Any?>()
-                        dataMap["refund_id"] = providerData["refund_id"]
-                        dataMap["provider_refund_id"] = providerData["provider_refund_id"]
-                        dataMap["refunded_at"] = providerData["refunded_at"]
-                        dataMap["status"] = providerData["status"]
+                        val dataMap = mutableMapOf<String, Any>()
+                        providerData["refund_id"]?.let { dataMap["refund_id"] = it }
+                        providerData["provider_refund_id"]?.let { dataMap["provider_refund_id"] = it }
+                        providerData["refunded_at"]?.let { dataMap["refunded_at"] = it }
+                        providerData["status"]?.let { dataMap["status"] = it }
 
-                        refund.data = dataMap.entries.joinToString(",", "{", "}") { (k, v) ->
-                            "\"$k\":${if (v is String) "\"$v\"" else v}"
-                        }
+                        refund.data = dataMap
                     }
 
                     val savedRefund = refundRepository.save(refund)

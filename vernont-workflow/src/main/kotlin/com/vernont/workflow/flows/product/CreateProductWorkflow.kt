@@ -3,6 +3,7 @@ package com.vernont.workflow.flows.product
 import com.vernont.domain.inventory.InventoryItem
 import com.vernont.domain.inventory.InventoryLevel
 import com.vernont.domain.product.Product
+import com.vernont.domain.product.dto.ProductResponse
 import com.vernont.domain.product.ProductImage
 import com.vernont.domain.product.ProductOption
 import com.vernont.domain.product.ProductVariant
@@ -55,7 +56,7 @@ data class ValidatedProductData(
  * This class orchestrates a series of steps to ensure a robust and transactional product creation process.
  */
 @Component
-@WorkflowTypes(input = CreateProductInput::class, output = Product::class)
+@WorkflowTypes(input = CreateProductInput::class, output = ProductResponse::class)
 class CreateProductWorkflow(
     private val productRepository: ProductRepository,
     private val productVariantRepository: ProductVariantRepository,
@@ -69,7 +70,7 @@ class CreateProductWorkflow(
     private val eventPublisher: EventPublisher,
     private val productImageStorageService: ProductImageStorageService,
     private val skuGeneratorService: SkuGeneratorService
-) : Workflow<CreateProductInput, Product> {
+) : Workflow<CreateProductInput, ProductResponse> {
 
     override val name = WorkflowConstants.CreateProduct.NAME
 
@@ -77,7 +78,7 @@ class CreateProductWorkflow(
     override suspend fun execute(
         input: CreateProductInput,
         context: WorkflowContext
-    ): WorkflowResult<Product> {
+    ): WorkflowResult<ProductResponse> {
         logger.info { "Starting product creation workflow for product: ${input.title}" }
 
         try {
@@ -529,8 +530,8 @@ class CreateProductWorkflow(
             publishProductCreatedEventStep.invoke(finalProduct, context)
 
             logger.info { "Product created successfully: ${finalProduct.id}" }
-            
-            return WorkflowResult.success(finalProduct)
+
+            return WorkflowResult.success(ProductResponse.from(finalProduct))
 
         } catch (e: Exception) {
             logger.error(e) { "Product creation workflow failed: ${e.message}" }

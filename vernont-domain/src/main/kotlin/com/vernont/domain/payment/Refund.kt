@@ -3,6 +3,8 @@ package com.vernont.domain.payment
 import com.vernont.domain.common.BaseEntity
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.math.BigDecimal
 
 @Entity
@@ -54,8 +56,9 @@ class Refund : BaseEntity() {
     @Column(columnDefinition = "TEXT")
     var note: String? = null
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    var data: String? = null
+    var data: Map<String, Any>? = null
 
     fun succeed() {
         require(status == RefundStatus.PENDING) { "Refund must be in pending status to succeed" }

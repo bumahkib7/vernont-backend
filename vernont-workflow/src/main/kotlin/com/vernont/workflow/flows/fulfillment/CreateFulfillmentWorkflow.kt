@@ -2,6 +2,7 @@ package com.vernont.workflow.flows.fulfillment
 
 import com.vernont.domain.fulfillment.Fulfillment
 import com.vernont.domain.fulfillment.FulfillmentItem
+import com.vernont.domain.fulfillment.dto.FulfillmentResponse
 import com.vernont.events.EventPublisher
 import com.vernont.events.FulfillmentCreated
 import com.vernont.events.FulfillmentItemData
@@ -74,6 +75,12 @@ data class CreateFulfillmentInput(
  * 3. Create fulfillment with shipping provider integration
  * 4. Return created fulfillment
  *
+ * To override this workflow in a consumer project, define your own bean with the same name:
+ * ```
+ * @Component("createFulfillmentWorkflow")
+ * class CustomCreateFulfillmentWorkflow(...) : Workflow<CreateFulfillmentInput, Fulfillment> { ... }
+ * ```
+ *
  * @example
  * val result = createFulfillmentWorkflow.execute(
  *   CreateFulfillmentInput(
@@ -101,13 +108,13 @@ data class CreateFulfillmentInput(
  * )
  */
 @Component
-@WorkflowTypes(input = CreateFulfillmentInput::class, output = Fulfillment::class)
+@WorkflowTypes(input = CreateFulfillmentInput::class, output = FulfillmentResponse::class)
 class CreateFulfillmentWorkflow(
     private val fulfillmentRepository: FulfillmentRepository,
     private val fulfillmentProviderRepository: FulfillmentProviderRepository,
     private val stockLocationRepository: StockLocationRepository,
     private val eventPublisher: EventPublisher
-) : Workflow<CreateFulfillmentInput, Fulfillment> {
+) : Workflow<CreateFulfillmentInput, FulfillmentResponse> {
 
     override val name = WorkflowConstants.CreateFulfillment.NAME
 
@@ -115,7 +122,7 @@ class CreateFulfillmentWorkflow(
     override suspend fun execute(
         input: CreateFulfillmentInput,
         context: WorkflowContext
-    ): WorkflowResult<Fulfillment> {
+    ): WorkflowResult<FulfillmentResponse> {
         logger.info { "Starting create fulfillment workflow for location: ${input.locationId}" }
 
         try {
@@ -301,7 +308,7 @@ class CreateFulfillmentWorkflow(
 
             logger.info { "Create fulfillment workflow completed. Fulfillment ID: ${fulfillment.id}" }
 
-            return WorkflowResult.success(fulfillment)
+            return WorkflowResult.success(FulfillmentResponse.from(fulfillment))
 
         } catch (e: Exception) {
             logger.error(e) { "Create fulfillment workflow failed: ${e.message}" }

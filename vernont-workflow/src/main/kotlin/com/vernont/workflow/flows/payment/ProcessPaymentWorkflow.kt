@@ -48,6 +48,12 @@ data class ProcessPaymentInput(
  * 4. Optionally capture payment if capturePayment is true
  * 5. Return updated payment
  *
+ * To override this workflow in a consumer project, define your own bean with the same name:
+ * ```
+ * @Component("processPaymentWorkflow")
+ * class CustomProcessPaymentWorkflow(...) : Workflow<ProcessPaymentInput, Payment> { ... }
+ * ```
+ *
  * @example
  * val result = processPaymentWorkflow.execute(
  *   ProcessPaymentInput(

@@ -2,6 +2,7 @@ package com.vernont.workflow.flows.customer
 
 import com.vernont.domain.auth.User
 import com.vernont.domain.customer.Customer
+import com.vernont.domain.customer.dto.CustomerResponse
 import com.vernont.events.CustomerAccountCreated
 import com.vernont.events.EventPublisher
 import com.vernont.repository.auth.UserRepository
@@ -43,17 +44,22 @@ data class CreateCustomerAccountInput(
  * 3. Create customer record linked to user
  * 4. Publish CustomerAccountCreated event
  * 5. Return created customer
+ *
+ * To override this workflow in a consumer project, define your own bean with the same name:
+ * ```
+ * @Component("createCustomerAccountWorkflow")
+ * class CustomCreateCustomerAccountWorkflow(...) : Workflow<CreateCustomerAccountInput, Customer> { ... }
+ * ```
  */
 @Component
-@WorkflowTypes(input = CreateCustomerAccountInput::class, output = Customer::class)
+@WorkflowTypes(input = CreateCustomerAccountInput::class, output = CustomerResponse::class)
 class CreateCustomerAccountWorkflow(
     private val customerRepository: CustomerRepository,
     private val passwordEncoder: WorkflowPasswordEncoder,
     private val userRepository: UserRepository,
     private val roleRepository: com.vernont.repository.auth.RoleRepository,
-    private val eventPublisher: EventPublisher,
-    private val workflowEngine: WorkflowEngine
-) : Workflow<CreateCustomerAccountInput, Customer> {
+    private val eventPublisher: EventPublisher
+) : Workflow<CreateCustomerAccountInput, CustomerResponse> {
 
     override val name = WorkflowConstants.CreateCustomerAccount.NAME
 
@@ -61,7 +67,7 @@ class CreateCustomerAccountWorkflow(
     override suspend fun execute(
         input: CreateCustomerAccountInput,
         context: WorkflowContext
-    ): WorkflowResult<Customer> {
+    ): WorkflowResult<CustomerResponse> {
         // Normalize email to lowercase for consistency
         val normalizedInput = input.copy(email = input.email.lowercase().trim())
         logger.info { "Starting create customer account workflow for email: ${normalizedInput.email}" }
@@ -180,7 +186,7 @@ class CreateCustomerAccountWorkflow(
                 "Customer ID: ${customer.id}, User ID: ${user.id}"
             }
 
-            return WorkflowResult.success(customer)
+            return WorkflowResult.success(CustomerResponse.from(customer))
 
         } catch (e: CustomerAccountAlreadyExistsException) {
             logger.error { "Create customer account workflow failed: ${e.message}" }

@@ -1,5 +1,6 @@
 package com.vernont.workflow.flows.returns
 
+import com.vernont.domain.order.FulfillmentStatus
 import com.vernont.domain.order.Order
 import com.vernont.domain.order.OrderLineItem
 import com.vernont.domain.returns.Return
