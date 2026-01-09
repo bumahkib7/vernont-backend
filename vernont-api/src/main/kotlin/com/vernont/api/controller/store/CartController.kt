@@ -5,6 +5,7 @@ import com.vernont.api.rate.RateLimited
 import com.vernont.domain.auth.UserContext
 import com.vernont.domain.auth.getCurrentUserContext
 import com.vernont.domain.cart.Cart
+import com.vernont.domain.order.dto.OrderResponse
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.WorkflowEngine
 import com.vernont.workflow.engine.WorkflowOptions
@@ -759,7 +760,7 @@ class CartController(
                     cartId = id
                 ),
                 inputType = com.vernont.workflow.flows.cart.CompleteCartInput::class,
-                outputType = com.vernont.domain.order.Order::class,
+                outputType = OrderResponse::class,
                 options = WorkflowOptions(
                     correlationId = correlationId,
                     lockKey = "cart:complete:$id",
@@ -769,16 +770,16 @@ class CartController(
 
             when {
                 result.isSuccess() -> {
-                    val order = result.getOrNull()!!
-                    logger.info { "Cart completed successfully: cartId=$id, orderId=${order.id}" }
+                    val orderResponse = result.getOrNull()!!
+                    logger.info { "Cart completed successfully: cartId=$id, orderId=${orderResponse.id}" }
 
                     ResponseEntity.ok(mapOf(
                         "type" to "order",
                         "order" to mapOf(
-                            "id" to order.id,
-                            "status" to order.status.name.lowercase(),
-                            "email" to order.email,
-                            "total" to order.total.multiply(BigDecimal(100)).toInt()
+                            "id" to orderResponse.id,
+                            "status" to orderResponse.status.name.lowercase(),
+                            "email" to orderResponse.email,
+                            "total" to orderResponse.total.multiply(BigDecimal(100)).toInt()
                         )
                     ))
                 }

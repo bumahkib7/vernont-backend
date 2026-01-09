@@ -15,6 +15,7 @@ import com.vernont.workflow.engine.WorkflowResult
 import com.vernont.workflow.flows.customer.CreateCustomerAccountInput
 import com.vernont.workflow.flows.customer.CustomerAccountAlreadyExistsException
 import com.vernont.workflow.flows.customer.WeakPasswordException
+import com.vernont.domain.customer.dto.CustomerResponse
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.servlet.http.Cookie
 import jakarta.servlet.http.HttpServletRequest
@@ -204,8 +205,7 @@ class AuthController(
                                         workflowName = WorkflowConstants.CreateCustomerAccount.NAME,
                                         input = input,
                                         inputType = CreateCustomerAccountInput::class,
-                                        outputType =
-                                                com.vernont.domain.customer.Customer::class,
+                                        outputType = CustomerResponse::class,
                                         options =
                                                 WorkflowOptions(
                                                         correlationId =
@@ -219,43 +219,42 @@ class AuthController(
 
                         return when (result) {
                                 is WorkflowResult.Success -> {
-                                        val customer =
-                                                result.data // This is the Customer entity returned
-                                        // by the workflow
-                                        val user =
-                                                customer.user
-                                                        ?: throw RuntimeException(
-                                                                "Customer must be linked to a User after creation"
-                                                        )
+                                        val customerResponse = result.data
+
+                                        // Look up the user by email (created by workflow)
+                                        val user = userRepository.findByEmail(customerResponse.email)
+                                                ?: throw RuntimeException(
+                                                        "User must exist after customer account creation"
+                                                )
 
                                         // Link any guest orders (orders placed before registration) to this customer
                                         try {
                                                 val linkedOrders =
                                                     withContext(Dispatchers.IO) {
                                                         orderService.linkGuestOrdersToCustomer(
-                                                            customerId = customer.id,
-                                                            email = customer.email
+                                                            customerId = customerResponse.id,
+                                                            email = customerResponse.email
                                                         )
                                                     }
                                                 if (linkedOrders > 0) {
-                                                        logger.info { "Linked $linkedOrders guest orders to newly registered customer: ${customer.id}" }
+                                                        logger.info { "Linked $linkedOrders guest orders to newly registered customer: ${customerResponse.id}" }
                                                 }
                                         } catch (e: Exception) {
                                                 // Don't fail registration if order linking fails
-                                                logger.warn(e) { "Failed to link guest orders for customer: ${customer.id}" }
+                                                logger.warn(e) { "Failed to link guest orders for customer: ${customerResponse.id}" }
                                         }
 
                                         // Generate tokens with customerId included
                                         val accessToken =
                                                 jwtTokenProvider.generateAccessToken(
                                                         user,
-                                                        customer.id
+                                                        customerResponse.id
                                                 )
                                         val refreshToken =
                                                 jwtTokenProvider.generateRefreshToken(user)
 
                                         logger.info {
-                                                "User and Customer registered successfully: userId=${user.id}, customerId=${customer.id}"
+                                                "User and Customer registered successfully: userId=${user.id}, customerId=${customerResponse.id}"
                                         }
 
                                         // Set HTTP-only cookies (for new secure frontend)
@@ -274,15 +273,11 @@ class AuthController(
                                                                                         user.firstName,
                                                                                 lastName =
                                                                                         user.lastName,
-                                                                                roles =
-                                                                                        user.roles
-                                                                                                .map {
-                                                                                                        it.name
-                                                                                                },
+                                                                                roles = user.roles.map { role -> role.name },
                                                                                 emailVerified =
                                                                                         user.emailVerified,
                                                                                 customerId =
-                                                                                        customer.id
+                                                                                        customerResponse.id
                                                                         )
                                                         )
                                                 )

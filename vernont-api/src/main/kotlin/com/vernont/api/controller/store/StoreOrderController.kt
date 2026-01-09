@@ -4,6 +4,7 @@ import com.vernont.domain.auth.UserContext
 import com.vernont.domain.auth.getCurrentUserContext
 import com.vernont.api.dto.store.*
 import com.vernont.domain.order.Order
+import com.vernont.domain.order.dto.OrderResponse as DomainOrderResponse
 import com.vernont.repository.order.OrderRepository
 import com.vernont.repository.fulfillment.FulfillmentRepository
 import com.vernont.application.order.OrderEventService
@@ -85,7 +86,7 @@ class StoreOrderController(
             workflowName = WorkflowConstants.CreateOrder.NAME,
             input = input,
             inputType = CreateOrderInput::class,
-            outputType = Order::class,
+            outputType = DomainOrderResponse::class,
             context = WorkflowContext(),
             options = WorkflowOptions(
                 correlationId = correlationId,
@@ -94,8 +95,23 @@ class StoreOrderController(
         )
 
         return when (result) {
-            is WorkflowResult.Success ->
-                ResponseEntity.status(201).body(OrderResponse.from(result.data))
+            is WorkflowResult.Success -> {
+                val domainResponse = result.data
+                ResponseEntity.status(201).body(
+                    OrderResponse(
+                        id = domainResponse.id,
+                        status = domainResponse.status.name,
+                        email = domainResponse.email,
+                        customerId = domainResponse.customerId,
+                        currencyCode = domainResponse.currencyCode,
+                        subtotal = domainResponse.subtotal.toString(),
+                        tax = domainResponse.tax.toString(),
+                        shipping = domainResponse.shipping.toString(),
+                        discount = domainResponse.discount.toString(),
+                        total = domainResponse.total.toString()
+                    )
+                )
+            }
 
             is WorkflowResult.Failure ->
                 ResponseEntity.badRequest().body(
