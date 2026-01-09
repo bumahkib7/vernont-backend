@@ -46,6 +46,11 @@ dependencies {
     // AWS SQS (for production messaging)
     implementation("software.amazon.awssdk:sqs:2.25.21")
 
+    // Spring JMS + Amazon SQS JMS integration
+    implementation("org.springframework:spring-jms:6.2.2")
+    implementation("com.amazonaws:amazon-sqs-java-messaging-lib:2.1.3")
+    implementation("jakarta.jms:jakarta.jms-api:3.1.0")
+
     // Spring Kafka (for Redpanda in dev)
     implementation("org.springframework.kafka:spring-kafka:4.0.1")
 
