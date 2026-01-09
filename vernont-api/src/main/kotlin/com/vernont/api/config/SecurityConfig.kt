@@ -227,6 +227,9 @@ class SecurityConfig(
                             .requestMatchers("/sitemap.xml", "/sitemap-*.xml")
                             .permitAll()
 
+                        // WebSocket endpoints - authentication handled by WebSocketAuthInterceptor
+                        .requestMatchers("/ws/**").permitAll()
+
                         // Stripe webhooks - must be public (verified by signature)
                         .requestMatchers("/webhooks/**").permitAll()
 
