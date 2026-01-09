@@ -269,6 +269,8 @@ shipengine:
     phone: ${SHIPENGINE_FROM_PHONE:+1 555 555 5555}
 
 # Messaging Configuration
+# Only essential queues (orders, notifications) are required.
+# Non-critical topics (workflow-events, etc.) gracefully skip if not configured.
 messaging:
   provider: ${MESSAGING_PROVIDER:kafka}
   kafka:
@@ -278,7 +280,6 @@ messaging:
     region: ${MESSAGING_SQS_REGION:eu-north-1}
     orders-queue-url: ${SQS_ORDERS_QUEUE_URL:}
     notifications-queue-url: ${SQS_NOTIFICATIONS_QUEUE_URL:}
-    workflow-events-queue-url: ${SQS_WORKFLOW_EVENTS_QUEUE_URL:}
 
 logging:
   level:
