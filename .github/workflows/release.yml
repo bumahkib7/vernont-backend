@@ -37,11 +37,11 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials for CodeArtifact
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_CODEARTIFACT_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CODEARTIFACT_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
 
       - name: Get CodeArtifact token
