@@ -223,10 +223,45 @@ class Product : BaseEntity() {
 }
 
 enum class ProductStatus {
+    /**
+     * Initial state - product is being drafted
+     */
     DRAFT,
+
+    /**
+     * Core data persisted, waiting for images/assets to upload
+     */
+    PENDING_ASSETS,
+
+    /**
+     * Product proposed for review (affiliate flow)
+     */
     PROPOSED,
+
+    /**
+     * All assets ready, product can be published
+     */
+    READY,
+
+    /**
+     * Product is live on storefront
+     */
     PUBLISHED,
-    REJECTED;
+
+    /**
+     * Product was rejected (affiliate flow)
+     */
+    REJECTED,
+
+    /**
+     * Product creation failed, awaiting cleanup
+     */
+    FAILED,
+
+    /**
+     * Product is archived/soft-deleted
+     */
+    ARCHIVED;
 
     @JsonValue
     fun toJson(): String = name.lowercase()
@@ -235,7 +270,26 @@ enum class ProductStatus {
         @JsonCreator
         @JvmStatic
         fun fromJson(value: String): ProductStatus = valueOf(value.uppercase())
+
+        /**
+         * States that are terminal (product won't change automatically)
+         */
+        val TERMINAL_STATES = setOf(PUBLISHED, REJECTED, ARCHIVED)
+
+        /**
+         * States where product is visible to customers
+         */
+        val VISIBLE_STATES = setOf(PUBLISHED)
+
+        /**
+         * States where product can be edited
+         */
+        val EDITABLE_STATES = setOf(DRAFT, PENDING_ASSETS, READY, PROPOSED)
     }
+
+    fun isVisible(): Boolean = this in VISIBLE_STATES
+    fun isEditable(): Boolean = this in EDITABLE_STATES
+    fun isTerminal(): Boolean = this in TERMINAL_STATES
 }
 
 

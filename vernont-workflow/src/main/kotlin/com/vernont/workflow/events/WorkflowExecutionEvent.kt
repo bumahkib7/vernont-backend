@@ -11,7 +11,8 @@ enum class WorkflowEventType {
     WORKFLOW_FAILED,
     STEP_STARTED,
     STEP_COMPLETED,
-    STEP_FAILED
+    STEP_FAILED,
+    STEP_PROGRESS
 }
 
 /**
@@ -44,7 +45,12 @@ data class WorkflowExecutionEvent(
     val durationMs: Long? = null,
     val timestamp: Instant = Instant.now(),
     val correlationId: String? = null,
-    val parentExecutionId: String? = null
+    val parentExecutionId: String? = null,
+    // Progress tracking fields
+    val progressPercent: Int? = null,         // 0-100 percentage
+    val progressCurrent: Int? = null,         // Current item number
+    val progressTotal: Int? = null,           // Total items to process
+    val progressMessage: String? = null       // Human-readable progress message
 ) {
     companion object {
         fun workflowStarted(
@@ -162,5 +168,33 @@ data class WorkflowExecutionEvent(
             durationMs = durationMs,
             correlationId = correlationId
         )
+
+        fun stepProgress(
+            executionId: String,
+            workflowName: String,
+            stepName: String,
+            stepIndex: Int,
+            totalSteps: Int,
+            progressCurrent: Int,
+            progressTotal: Int,
+            progressMessage: String? = null,
+            correlationId: String? = null
+        ): WorkflowExecutionEvent {
+            val percent = if (progressTotal > 0) (progressCurrent * 100) / progressTotal else 0
+            return WorkflowExecutionEvent(
+                eventType = WorkflowEventType.STEP_PROGRESS,
+                executionId = executionId,
+                workflowName = workflowName,
+                stepName = stepName,
+                stepIndex = stepIndex,
+                totalSteps = totalSteps,
+                status = ExecutionStatus.RUNNING,
+                progressPercent = percent,
+                progressCurrent = progressCurrent,
+                progressTotal = progressTotal,
+                progressMessage = progressMessage,
+                correlationId = correlationId
+            )
+        }
     }
 }

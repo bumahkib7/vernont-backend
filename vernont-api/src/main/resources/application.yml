@@ -8,6 +8,10 @@ spring:
   web:
     resources:
       add-mappings: true
+    error:
+      include-stacktrace: ${SERVER_ERROR_INCLUDE_STACKTRACE:on_param}
+      include-message: ${SERVER_ERROR_INCLUDE_MESSAGE:always}
+      include-binding-errors: ${SERVER_ERROR_INCLUDE_BINDING_ERRORS:always}
 
   servlet:
     multipart:
@@ -129,10 +133,6 @@ server:
   port: ${PORT:8080}
   servlet:
     context-path: ${SERVER_CONTEXT_PATH:/}
-  error:
-    include-message: ${SERVER_ERROR_INCLUDE_MESSAGE:always}
-    include-binding-errors: ${SERVER_ERROR_INCLUDE_BINDING_ERRORS:always}
-    include-stacktrace: ${SERVER_ERROR_INCLUDE_STACKTRACE:on_param}
   compression:
     enabled: ${SERVER_COMPRESSION_ENABLED:true}
     mime-types: ${SERVER_COMPRESSION_MIME_TYPES:application/json,application/xml,text/html,text/xml,text/plain}
@@ -178,11 +178,6 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
-    export:
-      prometheus:
-        enabled: ${ACTUATOR_PROMETHEUS_ENABLED:true}
-        step: 10s
-        descriptions: true
   health:
     livenessstate:
       enabled: true
@@ -192,6 +187,12 @@ management:
       enabled: true
     db:
       enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: ${ACTUATOR_PROMETHEUS_ENABLED:true}
+        step: 10s
+        descriptions: true
 
 # Application Configuration
 app:

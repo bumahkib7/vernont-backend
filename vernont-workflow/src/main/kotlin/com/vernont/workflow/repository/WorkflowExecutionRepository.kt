@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
+import jakarta.persistence.LockModeType
+import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import java.time.Instant
 
 /**
@@ -15,6 +18,68 @@ import java.time.Instant
  */
 @Repository
 interface WorkflowExecutionRepository : JpaRepository<WorkflowExecution, String> {
+
+    // ============================================================================
+    // IDEMPOTENCY QUERIES
+    // ============================================================================
+
+    /**
+     * Find by idempotency key with pessimistic lock for safe concurrent access.
+     * Uses SELECT ... FOR UPDATE to prevent race conditions.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.idempotencyKey = :key
+        AND w.workflowName = :workflowName
+        AND w.deletedAt IS NULL
+    """)
+    fun findByIdempotencyKeyForUpdate(
+        @Param("key") key: String,
+        @Param("workflowName") workflowName: String
+    ): WorkflowExecution?
+
+    /**
+     * Find by idempotency key without lock (for read-only checks)
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.idempotencyKey = :key
+        AND w.workflowName = :workflowName
+        AND w.deletedAt IS NULL
+    """)
+    fun findByIdempotencyKey(
+        @Param("key") key: String,
+        @Param("workflowName") workflowName: String
+    ): WorkflowExecution?
+
+    /**
+     * Find by result ID (e.g., product ID)
+     */
+    fun findByResultIdAndDeletedAtIsNull(resultId: String): WorkflowExecution?
+
+    /**
+     * Find stale running executions (for recovery)
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.status = 'RUNNING'
+        AND w.createdAt < :threshold
+        AND w.deletedAt IS NULL
+    """)
+    fun findStaleRunningExecutions(@Param("threshold") threshold: Instant): List<WorkflowExecution>
+
+    /**
+     * Find expired idempotency records for cleanup
+     */
+    @Query("""
+        SELECT w FROM WorkflowExecution w
+        WHERE w.expiresAt IS NOT NULL
+        AND w.expiresAt < :now
+        AND w.status IN ('COMPLETED', 'FAILED', 'CLEANED_UP')
+        AND w.deletedAt IS NULL
+    """)
+    fun findExpiredExecutions(@Param("now") now: Instant): List<WorkflowExecution>
     
     /**
      * Find executions by workflow name

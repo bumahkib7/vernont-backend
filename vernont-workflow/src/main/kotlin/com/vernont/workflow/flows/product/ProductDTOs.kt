@@ -38,7 +38,8 @@ data class ProductVariantInput(
 data class ProductVariantPriceInput(
     val currencyCode: String = "GBP",
     val amount: BigDecimal = BigDecimal.ZERO,
-    val regionId: String? = null // Optional, for region-specific pricing
+    val regionId: String? = null, // Optional, for region-specific pricing
+    val compareAtPrice: BigDecimal?
 )
 
 data class UpdateProductVariantInput(

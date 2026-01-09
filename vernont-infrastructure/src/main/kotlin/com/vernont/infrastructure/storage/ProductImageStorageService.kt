@@ -8,6 +8,30 @@ import java.net.URL
 import java.util.Base64
 import java.util.UUID
 
+/**
+ * Result of an image upload operation.
+ */
+data class ImageUploadResult(
+    val uploadedUrls: List<String>,
+    val failedSources: List<FailedImageUpload>
+) {
+    val hasFailures: Boolean get() = failedSources.isNotEmpty()
+    val allSucceeded: Boolean get() = failedSources.isEmpty()
+}
+
+data class FailedImageUpload(
+    val source: String,
+    val error: String
+)
+
+/**
+ * Callback for tracking upload progress.
+ * @param current Current image number (1-indexed)
+ * @param total Total number of images to upload
+ * @param message Human-readable status message
+ */
+typealias UploadProgressCallback = suspend (current: Int, total: Int, message: String) -> Unit
+
 @Service
 class ProductImageStorageService(
     private val storageService: StorageService,
@@ -16,36 +40,88 @@ class ProductImageStorageService(
 ) {
     private val logger = KotlinLogging.logger {}
 
+    /**
+     * Upload and resolve URLs for product images.
+     * Returns only successfully uploaded URLs. Failed uploads are logged but don't fail the entire operation.
+     */
     suspend fun uploadAndResolveUrls(imageSources: List<String>, productId: String): List<String> {
-        if (imageSources.isEmpty()) return emptyList()
+        val result = uploadAndResolveUrlsWithResult(imageSources, productId)
+        if (result.hasFailures) {
+            logger.warn { "Some images failed to upload for product $productId: ${result.failedSources.map { "${it.source}: ${it.error}" }}" }
+        }
+        return result.uploadedUrls
+    }
+
+    /**
+     * Upload and resolve URLs with detailed result including failures.
+     * Use this when you need to know which images failed and why.
+     *
+     * @param imageSources List of image URLs or base64 data to upload
+     * @param productId The product ID for organizing uploads
+     * @param onProgress Optional callback invoked after each image is processed (current, total, message)
+     */
+    suspend fun uploadAndResolveUrlsWithResult(
+        imageSources: List<String>,
+        productId: String,
+        onProgress: UploadProgressCallback? = null
+    ): ImageUploadResult {
+        if (imageSources.isEmpty()) return ImageUploadResult(emptyList(), emptyList())
 
         val uploadedUrls = mutableListOf<String>()
+        val failedSources = mutableListOf<FailedImageUpload>()
+        val total = imageSources.size
 
-        imageSources.forEach { raw ->
+        imageSources.forEachIndexed { index, raw ->
             val source = raw.trim()
-            if (source.isBlank()) return@forEach
+            val current = index + 1
 
-            if (isAlreadyStored(source)) {
-                logger.debug { "Skipping upload for already-stored image: $source" }
-                uploadedUrls += source
-                return@forEach
+            if (source.isBlank()) {
+                onProgress?.invoke(current, total, "Skipping blank image $current/$total")
+                return@forEachIndexed
             }
 
-            val payload = loadImage(source)
-            val key = buildObjectKey(productId, payload.extension)
+            try {
+                if (isAlreadyStored(source)) {
+                    logger.debug { "Skipping upload for already-stored image: $source" }
+                    uploadedUrls += source
+                    onProgress?.invoke(current, total, "Image $current/$total already stored")
+                    return@forEachIndexed
+                }
 
-            val url = storageService.uploadFileWithSize(
-                key,
-                payload.bytes.inputStream(),
-                payload.contentType,
-                payload.bytes.size.toLong(),
-                metadata = mapOf("productId" to productId)
-            )
-            logger.info { "Uploaded product image for $productId to key $key" }
-            uploadedUrls += url
+                onProgress?.invoke(current, total, "Uploading image $current/$total...")
+
+                val payload = loadImage(source)
+                val key = buildObjectKey(productId, payload.extension)
+
+                val url = storageService.uploadFileWithSize(
+                    key,
+                    payload.bytes.inputStream(),
+                    payload.contentType,
+                    payload.bytes.size.toLong(),
+                    metadata = mapOf("productId" to productId)
+                )
+                logger.info { "Uploaded product image for $productId to key $key" }
+                uploadedUrls += url
+                onProgress?.invoke(current, total, "Uploaded image $current/$total")
+            } catch (e: StorageException) {
+                val errorMsg = "S3 upload failed: ${e.message}"
+                logger.error(e) { "Failed to upload image for product $productId: $errorMsg" }
+                failedSources += FailedImageUpload(source.take(100), errorMsg)
+                onProgress?.invoke(current, total, "Failed image $current/$total: S3 error")
+            } catch (e: IllegalArgumentException) {
+                val errorMsg = "Invalid image data: ${e.message}"
+                logger.error(e) { "Failed to process image for product $productId: $errorMsg" }
+                failedSources += FailedImageUpload(source.take(100), errorMsg)
+                onProgress?.invoke(current, total, "Failed image $current/$total: Invalid data")
+            } catch (e: Exception) {
+                val errorMsg = "Unexpected error: ${e.message}"
+                logger.error(e) { "Failed to upload image for product $productId: $errorMsg" }
+                failedSources += FailedImageUpload(source.take(100), errorMsg)
+                onProgress?.invoke(current, total, "Failed image $current/$total: Error")
+            }
         }
 
-        return uploadedUrls
+        return ImageUploadResult(uploadedUrls, failedSources)
     }
 
     private fun isAlreadyStored(url: String): Boolean {

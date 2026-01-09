@@ -11,6 +11,7 @@ import com.vernont.repository.product.ProductRepository
 import com.vernont.repository.product.ProductImageRepository
 import com.vernont.repository.product.ProductVariantRepository
 import com.vernont.infrastructure.storage.ProductImageStorageService
+import com.vernont.infrastructure.storage.ImageUploadResult
 import com.vernont.infrastructure.storage.PresignedUrlService
 import com.vernont.workflow.engine.Workflow
 import com.vernont.workflow.engine.WorkflowContext
@@ -373,9 +374,13 @@ class UpdateProductWorkflow(
 
                     val originalImages = mutableMapOf<String, List<String>>()
 
-                    products.forEachIndexed { index, product ->
-                        val inputImages = batchInputs?.getOrNull(index)?.images ?: selectorImages
-                        val inputThumb = batchInputs?.getOrNull(index)?.thumbnail ?: selectorThumbnail
+                    // Get step index for progress events
+                    val stepIndex = ctx.getCurrentStepCount() - 1
+                    val totalSteps = 5 // Total steps in UpdateProductWorkflow
+
+                    products.forEachIndexed { productIndex, product ->
+                        val inputImages = batchInputs?.getOrNull(productIndex)?.images ?: selectorImages
+                        val inputThumb = batchInputs?.getOrNull(productIndex)?.thumbnail ?: selectorThumbnail
 
                         val newImages = mutableListOf<String>().apply {
                             if (inputImages != null) addAll(inputImages)
@@ -387,13 +392,38 @@ class UpdateProductWorkflow(
                         originalImages[product.id] =
                             productImageRepository.findByProductId(product.id).map { it.url }
 
-                        val uploaded = productImageStorageService.uploadAndResolveUrls(newImages, product.id)
+                        logger.info { "Starting upload of ${newImages.size} images for product ${product.id}" }
+
+                        // Progress callback for this product's image uploads
+                        val onProgress: suspend (Int, Int, String) -> Unit = { current, total, message ->
+                            ctx.publishStepProgress(
+                                stepName = "update-product-images",
+                                stepIndex = stepIndex,
+                                progressCurrent = current,
+                                progressTotal = total,
+                                progressMessage = "Product ${productIndex + 1}/${products.size}: $message",
+                                totalSteps = totalSteps
+                            )
+                        }
+
+                        val uploadResult = productImageStorageService.uploadAndResolveUrlsWithResult(
+                            imageSources = newImages,
+                            productId = product.id,
+                            onProgress = onProgress
+                        )
+
+                        if (uploadResult.hasFailures) {
+                            logger.warn {
+                                "Some images failed to upload for product ${product.id}: " +
+                                uploadResult.failedSources.joinToString { "${it.source.take(50)}: ${it.error}" }
+                            }
+                        }
 
                         // Clear existing images from the collection (orphanRemoval will delete from DB)
                         product.images.clear()
 
                         // Add new images using addImage to establish bidirectional relationship
-                        uploaded.forEachIndexed { idx, url ->
+                        uploadResult.uploadedUrls.forEachIndexed { idx, url ->
                             val productImage = ProductImage().apply {
                                 this.url = url
                                 this.position = idx
@@ -401,12 +431,14 @@ class UpdateProductWorkflow(
                             product.addImage(productImage)
                         }
 
-                        if (uploaded.isNotEmpty()) {
+                        if (uploadResult.uploadedUrls.isNotEmpty()) {
                             // Always store URL from storage; if none uploaded, clear unsafe thumbnail
-                            product.thumbnail = uploaded.first()
+                            product.thumbnail = uploadResult.uploadedUrls.first()
                         } else if (inputThumb != null && inputThumb.startsWith("data:", ignoreCase = true)) {
                             product.thumbnail = null
                         }
+
+                        logger.info { "Successfully processed ${uploadResult.uploadedUrls.size}/${newImages.size} images for product ${product.id}" }
 
                         // Save product with cascaded images
                         productRepository.save(product)

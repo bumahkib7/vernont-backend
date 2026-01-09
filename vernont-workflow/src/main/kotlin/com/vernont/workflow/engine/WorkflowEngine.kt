@@ -206,6 +206,38 @@ class WorkflowContext {
         )
     }
 
+    /**
+     * Publish step progress event for long-running step operations (e.g., image uploads).
+     * Progress events are only sent via WebSocket for real-time UI updates.
+     *
+     * @param stepName Name of the current step
+     * @param stepIndex The index returned from recordStepStart
+     * @param progressCurrent Current progress count (e.g., 2 of 5 images)
+     * @param progressTotal Total items to process
+     * @param progressMessage Optional human-readable message
+     * @param totalSteps Total number of steps in the workflow
+     */
+    fun publishStepProgress(
+        stepName: String,
+        stepIndex: Int,
+        progressCurrent: Int,
+        progressTotal: Int,
+        progressMessage: String? = null,
+        totalSteps: Int = 0
+    ) {
+        eventPublisher?.publishStepProgress(
+            executionId = executionId ?: "",
+            workflowName = workflowName ?: "",
+            stepName = stepName,
+            stepIndex = stepIndex,
+            totalSteps = totalSteps,
+            progressCurrent = progressCurrent,
+            progressTotal = progressTotal,
+            progressMessage = progressMessage,
+            correlationId = correlationId
+        )
+    }
+
     fun getExecutedSteps(): List<String> = synchronized(executedSteps) { executedSteps.toList() }
 
     fun getCurrentStepCount(): Int = stepCounter.get()

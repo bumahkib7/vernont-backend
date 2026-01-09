@@ -359,4 +359,41 @@ class WorkflowEventPublisher(
             correlationId = correlationId
         ))
     }
+
+    /**
+     * Publish step progress event (e.g., for image uploads).
+     * Only publishes to WebSocket for real-time UI updates, not to Kafka (no persistence needed).
+     */
+    fun publishStepProgress(
+        executionId: String,
+        workflowName: String,
+        stepName: String,
+        stepIndex: Int,
+        totalSteps: Int,
+        progressCurrent: Int,
+        progressTotal: Int,
+        progressMessage: String? = null,
+        correlationId: String? = null
+    ) {
+        val event = WorkflowExecutionEvent.stepProgress(
+            executionId = executionId,
+            workflowName = workflowName,
+            stepName = stepName,
+            stepIndex = stepIndex,
+            totalSteps = totalSteps,
+            progressCurrent = progressCurrent,
+            progressTotal = progressTotal,
+            progressMessage = progressMessage,
+            correlationId = correlationId
+        )
+
+        // Only publish to WebSocket for real-time updates (no persistence for progress events)
+        publishToWebSocket(event)
+
+        logger.debug {
+            "Published step progress: $workflowName/$stepName " +
+            "$progressCurrent/$progressTotal (${event.progressPercent}%) " +
+            "(execution=$executionId)"
+        }
+    }
 }

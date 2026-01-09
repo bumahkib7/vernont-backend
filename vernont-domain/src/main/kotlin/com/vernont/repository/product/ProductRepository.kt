@@ -287,6 +287,21 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
     fun findAllDistinctSizes(): List<String>
 
     /**
+     * Find products by status created before a certain time (for cleanup jobs)
+     */
+    @Query("""
+        SELECT p FROM Product p
+        WHERE p.status = :status
+          AND p.createdAt < :cutoff
+          AND p.deletedAt IS NULL
+        ORDER BY p.createdAt ASC
+    """)
+    fun findByStatusAndCreatedAtBefore(
+        @Param("status") status: ProductStatus,
+        @Param("cutoff") cutoff: java.time.Instant
+    ): List<Product>
+
+    /**
      * Extract distinct colors from variant options.
      * Looks for options with title 'Color' or 'Colour'.
      */
