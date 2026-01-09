@@ -21,7 +21,7 @@ import java.util.concurrent.ThreadPoolExecutor
 class WebSocketConfig(
     @Value("\${spring.security.cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:8080}")
     private val corsAllowedOrigins: List<String>,
-    @Value("\${spring.security.cors.allowed-origin-patterns:https://*.vercel.app}")
+    @Value("\${spring.security.cors.allowed-origin-patterns:https://*.vernont.com,https://vernont.com,https://*.vercel.app}")
     private val corsAllowedOriginPatterns: List<String>,
     private val webSocketAuthInterceptor: WebSocketAuthInterceptor,
     private val webSocketChannelInterceptor: WebSocketChannelInterceptor,

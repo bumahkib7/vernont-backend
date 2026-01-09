@@ -11,6 +11,7 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.core.annotation.Order
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
@@ -33,12 +34,34 @@ class SecurityConfig(
         )
         private val corsAllowedOrigins: List<String>,
         @Value(
-                "\${spring.security.cors.allowed-origin-patterns:https://*.vernont.com,https://vernont.com,https://*.vercel.app}"
+            "\${spring.security.cors.allowed-origin-patterns:https://*.vernont.com,https://vernont.com,https://*.vercel.app,https://admin.vernont.com}"
         )
         private val corsAllowedOriginPatterns: List<String>
 ) {
 
     @Bean fun passwordEncoder(): PasswordEncoder = argon2PasswordEncoder
+
+    // High-priority security filter chain for WebSocket/SockJS endpoints.
+    // Allows all requests without authentication - actual auth is handled by WebSocketAuthInterceptor.
+    @Bean
+    @Order(1)
+    fun webSocketSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .securityMatcher("/ws/**")
+            .cors { cors -> cors.configurationSource(corsConfigurationSource()) }
+            .csrf { csrf -> csrf.disable() }
+            .sessionManagement { session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            }
+            .authorizeHttpRequests { authorize ->
+                authorize.anyRequest().permitAll()
+            }
+            .headers { headers ->
+                // Allow iframe for SockJS fallback
+                headers.frameOptions { it.sameOrigin() }
+            }
+        return http.build()
+    }
 
     @Bean
     fun corsConfigurationSource(): CorsConfigurationSource {
@@ -57,6 +80,7 @@ class SecurityConfig(
     }
 
     @Bean
+    @Order(2)
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
                 .exceptionHandling { exc ->
