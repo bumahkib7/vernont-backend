@@ -27,23 +27,40 @@ class ReserveProductStep(
 
     override val name = "reserve-product"
 
+    companion object {
+        const val TOTAL_STEPS = 3
+    }
+
     override suspend fun invoke(
         input: ReserveStepInput,
         context: WorkflowContext
     ): StepResponse<ReserveResult> {
         logger.info { "Step [$name]: Starting for handle=${input.productInput.handle}" }
+        val startTime = System.currentTimeMillis()
+        val stepIndex = context.recordStepStart(name, input, TOTAL_STEPS)
 
-        val result = phase1Reserve.execute(
-            input = input.productInput,
-            idempotencyKey = input.idempotencyKey,
-            correlationId = input.correlationId
-        )
+        return try {
+            val result = phase1Reserve.execute(
+                input = input.productInput,
+                idempotencyKey = input.idempotencyKey,
+                correlationId = input.correlationId
+            )
 
-        // Store product ID for potential compensation in later steps
-        context.addMetadata("productId", result.productId)
-        context.addMetadata("executionId", result.executionId)
+            // Store product ID for potential compensation in later steps
+            context.addMetadata("productId", result.productId)
+            context.addMetadata("executionId", result.executionId)
 
-        return StepResponse.of(result, result.productId)
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepComplete(name, stepIndex, result, durationMs, TOTAL_STEPS)
+            logger.info { "Step [$name]: Completed in ${durationMs}ms" }
+
+            StepResponse.of(result, result.productId)
+        } catch (e: Exception) {
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepFailed(name, stepIndex, e, durationMs, TOTAL_STEPS)
+            logger.error(e) { "Step [$name]: Failed after ${durationMs}ms" }
+            throw e
+        }
     }
 
     // No compensation - DB transaction handles rollback
@@ -76,36 +93,53 @@ class UploadImagesStep(
 
     override val name = "upload-images"
 
+    companion object {
+        const val TOTAL_STEPS = 3
+    }
+
     override suspend fun invoke(
         input: UploadStepInput,
         context: WorkflowContext
     ): StepResponse<UploadResult> {
         logger.info { "Step [$name]: Starting for productId=${input.productId}" }
+        val startTime = System.currentTimeMillis()
+        val stepIndex = context.recordStepStart(name, input, TOTAL_STEPS)
 
-        val result = phase2Upload.execute(input.productId) { current, total, message, percent ->
-            // Publish progress via context
-            context.publishStepProgress(
-                stepName = name,
-                stepIndex = context.getCurrentStepCount() - 1,
-                progressCurrent = current,
-                progressTotal = total,
-                progressMessage = message,
-                totalSteps = 3
-            )
-        }
-
-        // Store uploaded URLs for potential compensation
-        val uploadedUrls = result.completedUrls.map { it.resultUrl }
-
-        // Register compensation for S3 cleanup (saga pattern)
-        // This runs automatically via context.runCompensations() on failure
-        if (uploadedUrls.isNotEmpty()) {
-            context.pushCompensation(name) {
-                deleteUploadedImages(input.productId)
+        return try {
+            val result = phase2Upload.execute(input.productId) { current, total, message, percent ->
+                // Publish progress via context using the captured stepIndex
+                context.publishStepProgress(
+                    stepName = name,
+                    stepIndex = stepIndex,
+                    progressCurrent = current,
+                    progressTotal = total,
+                    progressMessage = message,
+                    totalSteps = TOTAL_STEPS
+                )
             }
-        }
 
-        return StepResponse.of(result, S3CompensationData(input.productId, uploadedUrls))
+            // Store uploaded URLs for potential compensation
+            val uploadedUrls = result.completedUrls.map { it.resultUrl }
+
+            // Register compensation for S3 cleanup (saga pattern)
+            // This runs automatically via context.runCompensations() on failure
+            if (uploadedUrls.isNotEmpty()) {
+                context.pushCompensation(name) {
+                    deleteUploadedImages(input.productId)
+                }
+            }
+
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepComplete(name, stepIndex, result, durationMs, TOTAL_STEPS)
+            logger.info { "Step [$name]: Completed in ${durationMs}ms" }
+
+            StepResponse.of(result, S3CompensationData(input.productId, uploadedUrls))
+        } catch (e: Exception) {
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepFailed(name, stepIndex, e, durationMs, TOTAL_STEPS)
+            logger.error(e) { "Step [$name]: Failed after ${durationMs}ms" }
+            throw e
+        }
     }
 
     /**
@@ -186,20 +220,37 @@ class FinalizeProductStep(
 
     override val name = "finalize-product"
 
+    companion object {
+        const val TOTAL_STEPS = 3
+    }
+
     override suspend fun invoke(
         input: FinalizeStepInput,
         context: WorkflowContext
     ): StepResponse<FinalizeResult> {
         logger.info { "Step [$name]: Starting for productId=${input.productId}" }
+        val startTime = System.currentTimeMillis()
+        val stepIndex = context.recordStepStart(name, input, TOTAL_STEPS)
 
-        val result = phase3Finalize.execute(
-            executionId = input.executionId,
-            productId = input.productId,
-            uploadResult = input.uploadResult,
-            correlationId = input.correlationId
-        )
+        return try {
+            val result = phase3Finalize.execute(
+                executionId = input.executionId,
+                productId = input.productId,
+                uploadResult = input.uploadResult,
+                correlationId = input.correlationId
+            )
 
-        return StepResponse.of(result)
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepComplete(name, stepIndex, result, durationMs, TOTAL_STEPS)
+            logger.info { "Step [$name]: Completed in ${durationMs}ms" }
+
+            StepResponse.of(result)
+        } catch (e: Exception) {
+            val durationMs = System.currentTimeMillis() - startTime
+            context.recordStepFailed(name, stepIndex, e, durationMs, TOTAL_STEPS)
+            logger.error(e) { "Step [$name]: Failed after ${durationMs}ms" }
+            throw e
+        }
     }
 
     // No compensation - DB transaction handles rollback
