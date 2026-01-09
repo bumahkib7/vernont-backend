@@ -20,20 +20,33 @@ class S3Config(
 ) {
 
     /**
+     * Check if using local development (MinIO) based on endpoint URL containing localhost
+     */
+    private fun isLocalDev(): Boolean {
+        val endpoint = awsProperties.s3.endpointUrl
+        return endpoint.isNotBlank() && (endpoint.contains("localhost") || endpoint.contains("minio"))
+    }
+
+    /**
      * Determines the credentials provider to use:
-     * - For local dev (MinIO): uses static credentials when endpoint is set
-     * - For production (AWS): uses DefaultCredentialsProvider (IAM role, env vars, etc.)
+     * - For local dev (MinIO): uses static credentials when endpoint contains localhost/minio
+     * - For production (AWS): uses static credentials from env vars if provided
      */
     private fun getCredentialsProvider(): AwsCredentialsProvider {
-        val useStaticCredentials = awsProperties.s3.endpointUrl.isNotBlank()
+        val hasCredentials = awsProperties.credentials.accessKey.isNotBlank() &&
+                awsProperties.credentials.secretKey.isNotBlank()
 
-        return if (useStaticCredentials) {
-            logger.info { "Using static credentials for S3 (endpoint: ${awsProperties.s3.endpointUrl})" }
+        return if (hasCredentials) {
+            if (isLocalDev()) {
+                logger.info { "Using static credentials for MinIO (endpoint: ${awsProperties.s3.endpointUrl})" }
+            } else {
+                logger.info { "Using static credentials for AWS S3 (region: ${awsProperties.s3.region})" }
+            }
             StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(awsProperties.credentials.accessKey, awsProperties.credentials.secretKey)
             )
         } else {
-            logger.info { "Using default AWS credentials provider for S3 (IAM role/environment)" }
+            logger.info { "Using default AWS credentials provider (IAM role/instance profile)" }
             DefaultCredentialsProvider.create()
         }
     }
@@ -47,8 +60,8 @@ class S3Config(
             .region(region)
             .credentialsProvider(credentialsProvider)
 
-        // Configure endpoint if provided (for MinIO or S3-compatible services)
-        if (awsProperties.s3.endpointUrl.isNotBlank()) {
+        // Configure endpoint only for local dev (MinIO)
+        if (isLocalDev()) {
             s3ClientBuilder
                 .endpointOverride(URI.create(awsProperties.s3.endpointUrl))
                 .forcePathStyle(true) // Required for S3-compatible services like MinIO
@@ -66,7 +79,7 @@ class S3Config(
             .region(region)
             .credentialsProvider(credentialsProvider)
 
-        if (awsProperties.s3.endpointUrl.isNotBlank()) {
+        if (isLocalDev()) {
             builder.endpointOverride(URI.create(awsProperties.s3.endpointUrl))
         }
 
