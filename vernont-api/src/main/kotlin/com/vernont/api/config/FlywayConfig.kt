@@ -30,7 +30,10 @@ class FlywayConfig {
     @Value("\${spring.flyway.out-of-order:false}")
     private var outOfOrder: Boolean = false
 
-    @Bean(initMethod = "migrate")
+    @Value("\${spring.flyway.repair-on-migrate:false}")
+    private var repairOnMigrate: Boolean = false
+
+    @Bean
     fun flyway(dataSource: DataSource): Flyway {
         logger.info { "Configuring Flyway with locations: $locations" }
 
@@ -42,7 +45,15 @@ class FlywayConfig {
             .outOfOrder(outOfOrder)
             .load()
 
-        logger.info { "Flyway configured, migrations will run on bean init" }
+        if (repairOnMigrate) {
+            logger.warn { "Running Flyway repair before migration (FLYWAY_REPAIR_ON_MIGRATE=true)" }
+            flyway.repair()
+        }
+
+        logger.info { "Running Flyway migrations" }
+        flyway.migrate()
+
+        logger.info { "Flyway migrations completed" }
         return flyway
     }
 }
