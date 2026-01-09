@@ -41,7 +41,7 @@ class SqsMessagingService(
                 .withQueueUrl(queueUrl)
                 .withMessageBody(payload)
 
-            // Add message group ID for FIFO queues (based on key)
+            // Add a message group ID for FIFO queues (based on key)
             if (queueUrl.endsWith(".fifo") && key != null) {
                 request.withMessageGroupId(key)
                 request.withMessageDeduplicationId("${key}-${System.currentTimeMillis()}")

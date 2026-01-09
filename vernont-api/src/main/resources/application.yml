@@ -137,19 +137,19 @@ server:
     enabled: ${SERVER_COMPRESSION_ENABLED:true}
     mime-types: ${SERVER_COMPRESSION_MIME_TYPES:application/json,application/xml,text/html,text/xml,text/plain}
 
-# AWS S3 / MinIO Configuration
-# For local dev: uses MinIO at localhost:9000
-# For prod: set AWS_S3_ENDPOINT to empty and provide real AWS credentials
+# AWS Configuration
+# Set AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_S3_BUCKET, AWS_REGION in environment (Elastic Beanstalk)
+# For local dev with MinIO: set AWS_S3_ENDPOINT=http://localhost:9000
 aws:
   s3:
-    bucket-name: ${AWS_S3_BUCKET:vernont}
-    region: ${AWS_REGION:us-east-1}
+    bucket-name: ${AWS_S3_BUCKET:}
+    region: ${AWS_REGION:eu-north-1}
     url-expiration-hours: ${AWS_S3_URL_EXPIRATION_HOURS:24}
-    endpoint-url: ${AWS_S3_ENDPOINT:http://localhost:9000}
+    endpoint-url: ${AWS_S3_ENDPOINT:}
     presign-enabled: ${AWS_S3_PRESIGN_ENABLED:false}
   credentials:
-    access-key: ${AWS_ACCESS_KEY:minioadmin}
-    secret-key: ${AWS_SECRET_KEY:minioadmin}
+    access-key: ${AWS_ACCESS_KEY:}
+    secret-key: ${AWS_SECRET_KEY:}
 
 # Actuator Configuration
 management:
