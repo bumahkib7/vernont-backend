@@ -2,7 +2,6 @@ package com.vernont.api.controller.admin
 
 import com.vernont.application.product.ProductService
 import com.vernont.domain.auth.UserContext
-import com.vernont.domain.product.Product
 import com.vernont.domain.product.dto.CreateProductImageRequest
 import com.vernont.domain.product.dto.CreateProductOptionRequest
 import com.vernont.domain.product.dto.ProductResponse
@@ -56,7 +55,7 @@ class AdminProductController(
             workflowName = WorkflowConstants.CreateProduct.NAME,
             input = request,
             inputType = CreateProductInput::class,
-            outputType = Product::class,
+            outputType = ProductResponse::class,
             context = context,
             options = WorkflowOptions(
                 correlationId = correlationId,
@@ -66,9 +65,9 @@ class AdminProductController(
 
         return@runBlocking when (result) {
             is WorkflowResult.Success -> {
-                val product = result.data
-                logger.info { "Product creation workflow succeeded for product ID: ${product.id}, correlationId: $correlationId" }
-                ResponseEntity.status(HttpStatus.CREATED).body(product)
+                val productResponse = result.data
+                logger.info { "Product creation workflow succeeded for product ID: ${productResponse.id}, correlationId: $correlationId" }
+                ResponseEntity.status(HttpStatus.CREATED).body(productResponse)
             }
 
             is WorkflowResult.Failure -> {
