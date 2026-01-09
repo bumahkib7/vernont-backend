@@ -10,15 +10,15 @@ class AwsProperties {
     var credentials: Credentials = Credentials()
 
     class S3 {
-        var bucketName: String = "product-images"
-        var region: String = "us-east-1"
+        var bucketName: String = ""
+        var region: String = "eu-north-1"
         var urlExpirationHours: Int = 24
-        var endpointUrl: String = "" // Added this
-        var presignEnabled: Boolean = true
+        var endpointUrl: String = ""
+        var presignEnabled: Boolean = false
     }
 
     class Credentials {
-        var accessKey: String = "minioadmin" // Dummy default for MinIO
-        var secretKey: String = "minioadmin" // Dummy default for MinIO
+        var accessKey: String = ""
+        var secretKey: String = ""
     }
 }
