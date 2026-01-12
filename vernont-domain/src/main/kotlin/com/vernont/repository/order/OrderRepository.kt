@@ -186,4 +186,42 @@ interface OrderRepository : JpaRepository<Order, String> {
 
     @Query("SELECT COALESCE(MAX(o.displayId), 0) + 1 FROM Order o")
     fun getNextDisplayId(): Int
+
+    // ==================== Review Verification Queries ====================
+
+    /**
+     * Check if customer has purchased a specific product (for verified review badge)
+     */
+    @Query("""
+        SELECT CASE WHEN COUNT(o) > 0 THEN true ELSE false END
+        FROM Order o
+        JOIN o.items i
+        WHERE o.customerId = :customerId
+        AND i.productId = :productId
+        AND o.status IN ('COMPLETED', 'SHIPPED', 'DELIVERED')
+        AND o.deletedAt IS NULL
+    """)
+    fun existsByCustomerIdAndProductId(
+        @Param("customerId") customerId: String,
+        @Param("productId") productId: String
+    ): Boolean
+
+    /**
+     * Find first order containing a specific product for a customer
+     */
+    @EntityGraph(value = "Order.withItems", type = EntityGraph.EntityGraphType.LOAD)
+    @Query("""
+        SELECT o FROM Order o
+        JOIN o.items i
+        WHERE o.customerId = :customerId
+        AND i.productId = :productId
+        AND o.status IN ('COMPLETED', 'SHIPPED', 'DELIVERED')
+        AND o.deletedAt IS NULL
+        ORDER BY o.createdAt DESC
+    """)
+    fun findFirstByCustomerIdAndProductId(
+        @Param("customerId") customerId: String,
+        @Param("productId") productId: String,
+        pageable: Pageable
+    ): Page<Order>
 }

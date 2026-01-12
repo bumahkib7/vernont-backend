@@ -9,6 +9,7 @@ import com.vernont.events.EventPublisher
 import com.vernont.repository.order.OrderRepository
 import com.vernont.repository.order.OrderLineItemRepository
 import com.vernont.repository.customer.CustomerRepository
+import com.vernont.repository.product.ProductVariantRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -26,6 +27,7 @@ class OrderService(
     private val orderRepository: OrderRepository,
     private val orderLineItemRepository: OrderLineItemRepository,
     private val customerRepository: CustomerRepository,
+    private val productVariantRepository: ProductVariantRepository,
     private val eventPublisher: EventPublisher
 ) {
 
@@ -90,9 +92,14 @@ class OrderService(
 
         // Create line items
         request.items.forEach { itemRequest ->
+            // Look up product ID from variant for verified purchase checks
+            val variant = itemRequest.variantId?.let {
+                productVariantRepository.findByIdAndDeletedAtIsNull(it)
+            }
             val lineItem = OrderLineItem().apply {
                 this.order = savedOrder
                 variantId = itemRequest.variantId
+                productId = variant?.product?.id
                 title = itemRequest.title
                 description = itemRequest.description
                 thumbnail = itemRequest.thumbnail

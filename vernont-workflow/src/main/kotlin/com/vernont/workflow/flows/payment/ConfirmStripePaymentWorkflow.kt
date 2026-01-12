@@ -12,6 +12,7 @@ import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.order.OrderRepository
 import com.vernont.repository.payment.PaymentRepository
 import com.vernont.repository.payment.PaymentProviderRepository
+import com.vernont.repository.product.ProductVariantRepository
 import com.vernont.workflow.common.WorkflowConstants
 import com.vernont.workflow.engine.Workflow
 import com.vernont.workflow.engine.WorkflowContext
@@ -76,6 +77,7 @@ class ConfirmStripePaymentWorkflow(
     private val orderRepository: OrderRepository,
     private val paymentRepository: PaymentRepository,
     private val paymentProviderRepository: PaymentProviderRepository,
+    private val productVariantRepository: ProductVariantRepository,
     private val stripeService: StripeService,
     private val orderEventService: OrderEventService
 ) : Workflow<ConfirmStripePaymentInput, StripePaymentConfirmationResponse> {
@@ -191,6 +193,9 @@ class ConfirmStripePaymentWorkflow(
                         val orderItem = OrderLineItem()
                         orderItem.order = order
                         orderItem.variantId = cartItem.variantId
+                        // Look up product ID from variant for verified purchase checks
+                        val variant = productVariantRepository.findByIdAndDeletedAtIsNull(cartItem.variantId)
+                        orderItem.productId = variant?.product?.id
                         orderItem.title = cartItem.title
                         orderItem.description = cartItem.description
                         orderItem.thumbnail = cartItem.thumbnail

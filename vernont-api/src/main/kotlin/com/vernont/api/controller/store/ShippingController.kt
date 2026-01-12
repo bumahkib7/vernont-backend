@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 private val logger = KotlinLogging.logger {}
 
@@ -64,6 +66,12 @@ class ShippingController(
             }
 
             val shippingOptionDtos = shippingOptions.map { option ->
+                // Calculate estimated delivery dates
+                val today = LocalDate.now()
+                val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+                val estimatedDateMin = option.estimatedDaysMin?.let { today.plusDays(it.toLong()) }
+                val estimatedDateMax = option.estimatedDaysMax?.let { today.plusDays(it.toLong()) }
+
                 mapOf(
                     "id" to option.id,
                     "name" to option.name,
@@ -73,6 +81,11 @@ class ShippingController(
                     "admin_only" to false, // Not tracked in current model
                     "provider_id" to option.provider?.id,
                     "region_id" to option.regionId,
+                    "carrier" to option.carrier,
+                    "estimated_days_min" to option.estimatedDaysMin,
+                    "estimated_days_max" to option.estimatedDaysMax,
+                    "estimated_delivery_date_min" to estimatedDateMin?.format(dateFormatter),
+                    "estimated_delivery_date_max" to estimatedDateMax?.format(dateFormatter),
                     "data" to option.data,
                     "metadata" to option.metadata
                 )

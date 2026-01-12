@@ -1,15 +1,19 @@
 package com.vernont.api.controller.store
 
+import com.vernont.application.review.ReviewService
 import com.vernont.domain.product.Product
 import com.vernont.domain.product.dto.*
 import com.vernont.infrastructure.storage.PresignedUrlService
 import com.vernont.repository.product.ProductRepository
 import com.vernont.api.service.StoreProductService
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.jpa.domain.Specification
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import jakarta.persistence.criteria.Predicate
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Store Product Controller - Medusa-compatible API
@@ -23,7 +27,8 @@ import jakarta.persistence.criteria.Predicate
 class ProductController(
     private val productRepository: ProductRepository,
     private val storeProductService: StoreProductService,
-    private val presignedUrlService: PresignedUrlService
+    private val presignedUrlService: PresignedUrlService,
+    private val reviewService: ReviewService
 ) {
 
     @GetMapping
@@ -56,8 +61,31 @@ class ProductController(
         val inventoryMap = storeProductService.getInventoryForVariants(variantIds)
         val priceMap = storeProductService.getPricesForVariants(variantIds, currencyCode, regionId)
 
+        // Fetch review stats for all products
+        val productIds = productsPage.content.map { it.id }
+        val reviewStatsMap = try {
+            reviewService.getProductStatsForMultiple(productIds)
+                .mapValues { (_, stats) ->
+                    StoreProductReviewStatsDto(
+                        averageRating = stats.averageRating,
+                        reviewCount = stats.totalReviews,
+                        recommendationPercent = stats.recommendationPercent
+                    )
+                }
+        } catch (e: Exception) {
+            logger.warn(e) { "Failed to fetch review stats for products" }
+            emptyMap()
+        }
+
         val response = StoreProductListResponse(
-            products = productsPage.content.map { signMedia(StoreProductDto.from(it, inventoryMap, priceMap)) },
+            products = productsPage.content.map { product ->
+                signMedia(StoreProductDto.from(
+                    product,
+                    inventoryMap,
+                    priceMap,
+                    reviewStatsMap[product.id]
+                ))
+            },
             count = productsPage.totalElements.toInt(),
             offset = offset,
             limit = limit
@@ -79,9 +107,22 @@ class ProductController(
         val inventoryMap = storeProductService.getInventoryForVariants(variantIds)
         val priceMap = storeProductService.getPricesForVariants(variantIds, currencyCode, regionId)
 
+        // Fetch review stats for this product
+        val reviewStats = try {
+            val stats = reviewService.getProductStats(id)
+            StoreProductReviewStatsDto(
+                averageRating = stats.averageRating,
+                reviewCount = stats.totalReviews,
+                recommendationPercent = stats.recommendationPercent
+            )
+        } catch (e: Exception) {
+            logger.warn(e) { "Failed to fetch review stats for product $id" }
+            null
+        }
+
         return ResponseEntity.ok(
             StoreProductResponse(
-                product = signMedia(StoreProductDto.from(product, inventoryMap, priceMap))
+                product = signMedia(StoreProductDto.from(product, inventoryMap, priceMap, reviewStats))
             )
         )
     }

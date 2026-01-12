@@ -213,7 +213,8 @@ class ListStorefrontProductsWorkflow(
                     currency = price?.currencyCode,
                     inventoryQuantity = null // Inventory lookup requires separate service
                 )
-            }
+            },
+            metadata = product.metadata
         )
     }
 }

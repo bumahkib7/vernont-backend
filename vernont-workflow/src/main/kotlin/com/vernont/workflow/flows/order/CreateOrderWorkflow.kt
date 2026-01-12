@@ -528,8 +528,10 @@ class CreateOrderWorkflow(
 
                     // Convert cart items to order items
                     cart.items.forEach { cartItem ->
+                        val variant = productVariantRepository.findByIdAndDeletedAtIsNull(cartItem.variantId)
                         val orderItem = com.vernont.domain.order.OrderLineItem().apply {
                             variantId = cartItem.variantId
+                            productId = variant?.product?.id
                             title = cartItem.title
                             quantity = cartItem.quantity
                             unitPrice = cartItem.unitPrice

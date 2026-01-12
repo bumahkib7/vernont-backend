@@ -94,6 +94,15 @@ data class StoreProductOptionDto(
     val values: List<StoreProductOptionValueDto>
 )
 
+/**
+ * Review statistics for a product (used in product listings)
+ */
+data class StoreProductReviewStatsDto(
+    @JsonProperty("average_rating") val averageRating: java.math.BigDecimal,
+    @JsonProperty("review_count") val reviewCount: Int,
+    @JsonProperty("recommendation_percent") val recommendationPercent: Int? = null
+)
+
 data class StoreProductDto(
     val id: String,
     val title: String,
@@ -117,6 +126,8 @@ data class StoreProductDto(
     val variants: List<StoreProductVariantDto>,
     val images: List<StoreProductImageDto>,
     val options: List<StoreProductOptionDto>,
+    val metadata: Map<String, Any?>?,
+    @JsonProperty("review_stats") val reviewStats: StoreProductReviewStatsDto? = null,
     @JsonProperty("created_at") val createdAt: Instant,
     @JsonProperty("updated_at") val updatedAt: Instant
 ) {
@@ -124,7 +135,8 @@ data class StoreProductDto(
         fun from(
             product: Product,
             inventoryMap: Map<String, Int> = emptyMap(),
-            priceMap: Map<String, StoreCalculatedPriceDto> = emptyMap()
+            priceMap: Map<String, StoreCalculatedPriceDto> = emptyMap(),
+            reviewStats: StoreProductReviewStatsDto? = null
         ) = StoreProductDto(
             id = product.id,
             title = product.title,
@@ -145,6 +157,7 @@ data class StoreProductDto(
             material = product.material,
             collectionId = product.collection?.id,
             typeId = product.type?.id,
+            metadata = product.metadata,
             variants = product.variants.filter { it.deletedAt == null }.map {
                 // Default to generous availability (999) when inventory data is missing so frontend doesn't show "Out of stock" for unknown stock.
                 val inventoryQty = inventoryMap[it.id] ?: 999
@@ -156,6 +169,7 @@ data class StoreProductDto(
             },
             images = product.images.filter { it.deletedAt == null }.sortedBy { it.position }.map { StoreProductImageDto.from(it) },
             options = buildProductOptions(product),
+            reviewStats = reviewStats,
             createdAt = product.createdAt,
             updatedAt = product.updatedAt
         )

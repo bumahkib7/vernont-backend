@@ -374,7 +374,7 @@ class AdminSecurityController(
         val pageable = PageRequest.of(
             offset / limit.coerceAtLeast(1),
             limit.coerceAtMost(100),
-            Sort.by(Sort.Direction.DESC, "createdAt")
+            Sort.unsorted()
         )
 
         val page = securityEventRepository.findByFilters(eventType, severityEnum, resolved, pageable)

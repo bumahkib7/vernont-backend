@@ -4,6 +4,7 @@ import com.vernont.api.dto.store.StoreSettingsPublicDto
 import com.vernont.api.dto.store.StoreSettingsPublicResponse
 import com.vernont.application.store.StoreSettingsNotFoundException
 import com.vernont.application.store.StoreSettingsService
+import com.vernont.application.payment.RefundReasonConfigService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -16,7 +17,8 @@ private val logger = KotlinLogging.logger {}
 @RequestMapping("/store/settings")
 @Tag(name = "Store Settings", description = "Public store settings for storefront")
 class StoreSettingsController(
-    private val storeSettingsService: StoreSettingsService
+    private val storeSettingsService: StoreSettingsService,
+    private val refundReasonConfigService: RefundReasonConfigService
 ) {
 
     @Operation(summary = "Get public store settings for storefront")
@@ -95,4 +97,28 @@ class StoreSettingsController(
             ResponseEntity.notFound().build()
         }
     }
+
+    @Operation(summary = "Get available refund reasons for customers")
+    @GetMapping("/refund-reasons")
+    fun getRefundReasons(): ResponseEntity<List<RefundReasonPublicDto>> {
+        logger.debug { "GET /store/settings/refund-reasons" }
+
+        val reasons = refundReasonConfigService.list(active = true)
+            .sortedBy { it.displayOrder }
+            .map { RefundReasonPublicDto(
+                value = it.value,
+                label = it.label,
+                description = it.description,
+                requiresNote = it.requiresNote
+            )}
+
+        return ResponseEntity.ok(reasons)
+    }
 }
+
+data class RefundReasonPublicDto(
+    val value: String,
+    val label: String,
+    val description: String? = null,
+    val requiresNote: Boolean = false
+)

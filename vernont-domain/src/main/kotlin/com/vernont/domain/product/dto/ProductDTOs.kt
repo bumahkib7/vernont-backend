@@ -56,7 +56,47 @@ data class UpdateProductRequest(
     val originCountry: String? = null,
     val material: String? = null,
     val collectionId: String? = null,
-    val typeId: String? = null
+    val typeId: String? = null,
+    val metadata: Map<String, Any?>? = null
+)
+
+/**
+ * Fragrance-specific metadata structure.
+ * This defines the expected shape of product.metadata for fragrance products.
+ *
+ * Example JSON structure:
+ * {
+ *   "fragrance": {
+ *     "notes": {
+ *       "top": ["Bergamot", "Pink Pepper", "Lemon"],
+ *       "heart": ["Rose", "Jasmine", "Iris"],
+ *       "base": ["Sandalwood", "Musk", "Amber"]
+ *     },
+ *     "concentration": "Eau de Parfum",
+ *     "longevity": 8,
+ *     "sillage": 6,
+ *     "gender": "unisex",
+ *     "season": ["spring", "summer"],
+ *     "occasion": ["date", "office", "casual"],
+ *     "ingredients": "Alcohol Denat., Parfum/Fragrance, Aqua/Water..."
+ *   }
+ * }
+ */
+data class FragranceMetadata(
+    val notes: FragranceNotes? = null,
+    val concentration: String? = null,
+    val longevity: Int? = null,        // 1-10 scale
+    val sillage: Int? = null,          // 1-10 scale
+    val gender: String? = null,         // "masculine", "feminine", "unisex"
+    val season: List<String>? = null,   // ["spring", "summer", "fall", "winter"]
+    val occasion: List<String>? = null, // ["date", "office", "casual", "evening", "sport"]
+    val ingredients: String? = null
+)
+
+data class FragranceNotes(
+    val top: List<String>? = null,
+    val heart: List<String>? = null,
+    val base: List<String>? = null
 )
 
 data class CreateProductOptionRequest(
@@ -165,6 +205,7 @@ data class ProductResponse(
     val options: List<ProductOptionResponse>,
     val tags: List<String>,
     val categories: List<String>,
+    val metadata: Map<String, Any?>?,
     val createdAt: Instant,
     val updatedAt: Instant
 ) {
@@ -207,6 +248,7 @@ data class ProductResponse(
                 categories = product.categories
                     .filter { it.deletedAt == null }
                     .map { it.id },  // Return IDs for editing, not names
+                metadata = product.metadata,
                 createdAt = product.createdAt,
                 updatedAt = product.updatedAt
             )

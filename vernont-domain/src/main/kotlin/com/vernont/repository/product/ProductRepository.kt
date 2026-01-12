@@ -115,14 +115,23 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
     @Query("SELECT p FROM Product p WHERE LOWER(p.title) LIKE LOWER(CONCAT('%', :searchTerm, '%')) AND p.deletedAt IS NULL")
     fun searchByTitle(@Param("searchTerm") searchTerm: String): List<Product>
 
-    // PostgreSQL Full-Text Search
+    // PostgreSQL Full-Text Search with SKU, ID, and variant ID support
     @Query(
         value = """
-            SELECT p.* FROM product p
-            WHERE p.search_vector @@ plainto_tsquery('english', :query)
+            SELECT DISTINCT p.* FROM product p
+            LEFT JOIN product_variant pv ON pv.product_id = p.id AND pv.deleted_at IS NULL
+            WHERE (
+                p.search_vector @@ plainto_tsquery('english', :query)
+                OR LOWER(pv.sku) LIKE LOWER(CONCAT('%', :query, '%'))
+                OR LOWER(pv.barcode) LIKE LOWER(CONCAT('%', :query, '%'))
+                OR LOWER(p.id) = LOWER(:query)
+                OR LOWER(pv.id) = LOWER(:query)
+            )
               AND p.status = 'PUBLISHED'
               AND p.deleted_at IS NULL
-            ORDER BY ts_rank(p.search_vector, plainto_tsquery('english', :query)) DESC
+            ORDER BY
+                CASE WHEN LOWER(p.id) = LOWER(:query) OR LOWER(pv.id) = LOWER(:query) THEN 0 ELSE 1 END,
+                ts_rank(p.search_vector, plainto_tsquery('english', :query)) DESC
             LIMIT :limit OFFSET :offset
         """,
         nativeQuery = true
@@ -135,8 +144,15 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
 
     @Query(
         value = """
-            SELECT COUNT(*) FROM product p
-            WHERE p.search_vector @@ plainto_tsquery('english', :query)
+            SELECT COUNT(DISTINCT p.id) FROM product p
+            LEFT JOIN product_variant pv ON pv.product_id = p.id AND pv.deleted_at IS NULL
+            WHERE (
+                p.search_vector @@ plainto_tsquery('english', :query)
+                OR LOWER(pv.sku) LIKE LOWER(CONCAT('%', :query, '%'))
+                OR LOWER(pv.barcode) LIKE LOWER(CONCAT('%', :query, '%'))
+                OR LOWER(p.id) = LOWER(:query)
+                OR LOWER(pv.id) = LOWER(:query)
+            )
               AND p.status = 'PUBLISHED'
               AND p.deleted_at IS NULL
         """,
@@ -163,12 +179,13 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
         @Param("offset") offset: Int
     ): List<Product>
 
-    // Search suggestions using trigram similarity
+    // Search suggestions using trigram similarity (includes title and SKU matches)
     // Note: CAST is required for PostgreSQL to determine parameter types in native queries
     @Query(
         value = """
-            SELECT title FROM (
-                SELECT DISTINCT p.title, similarity(p.title, CAST(:query AS text)) AS sim
+            SELECT suggestion FROM (
+                -- Title suggestions
+                SELECT DISTINCT p.title AS suggestion, similarity(p.title, CAST(:query AS text)) AS sim, 1 as priority
                 FROM product p
                 WHERE p.status = 'PUBLISHED'
                   AND p.deleted_at IS NULL
@@ -176,7 +193,18 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
                     p.title ILIKE CONCAT('%', CAST(:query AS text), '%')
                     OR similarity(p.title, CAST(:query AS text)) > 0.1
                   )
-                ORDER BY sim DESC, p.title
+                UNION ALL
+                -- SKU suggestions (return product title for SKU matches)
+                SELECT DISTINCT p.title AS suggestion, 1.0 AS sim, 0 as priority
+                FROM product p
+                JOIN product_variant pv ON pv.product_id = p.id AND pv.deleted_at IS NULL
+                WHERE p.status = 'PUBLISHED'
+                  AND p.deleted_at IS NULL
+                  AND (
+                    pv.sku ILIKE CONCAT('%', CAST(:query AS text), '%')
+                    OR pv.barcode ILIKE CONCAT('%', CAST(:query AS text), '%')
+                  )
+                ORDER BY priority ASC, sim DESC
                 LIMIT :limit
             ) AS suggestions
         """,

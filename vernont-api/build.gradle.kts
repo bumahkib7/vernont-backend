@@ -94,6 +94,7 @@ dependencies {
 
     // Dotenv support - loads .env files into Spring environment
     implementation("me.paulschwarz:spring-dotenv:4.0.0")
+    implementation("io.github.cdimascio:dotenv-java:3.0.0")
 
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test:4.0.1")

@@ -20,5 +20,6 @@ data class StorefrontProductDto(
     val brand: String?,
     val lowestPriceMinor: Long?,
     val currency: String?,
-    val variants: List<StorefrontVariantDto>
+    val variants: List<StorefrontVariantDto>,
+    val metadata: Map<String, Any?>? = null
 )

@@ -337,4 +337,29 @@ class StoreReturnController(
 
         return ResponseEntity.ok(response)
     }
+
+    /**
+     * Get available return reasons
+     * GET /store/returns/reasons
+     */
+    @GetMapping("/reasons")
+    fun getReturnReasons(): ResponseEntity<List<ReturnReasonDto>> {
+        val reasons = ReturnReason.entries.map { reason ->
+            ReturnReasonDto(
+                value = reason.name,
+                label = reason.name.replace("_", " ")
+                    .lowercase()
+                    .split(" ")
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
+                requiresNote = reason == ReturnReason.OTHER
+            )
+        }
+        return ResponseEntity.ok(reasons)
+    }
 }
+
+data class ReturnReasonDto(
+    val value: String,
+    val label: String,
+    val requiresNote: Boolean = false
+)

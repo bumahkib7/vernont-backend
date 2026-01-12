@@ -2,6 +2,7 @@ package com.vernont.api.controller.store
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.vernont.api.rate.RateLimited
+import com.vernont.api.service.CartSessionService
 import com.vernont.domain.auth.UserContext
 import com.vernont.domain.auth.getCurrentUserContext
 import com.vernont.domain.cart.Cart
@@ -23,6 +24,8 @@ import com.vernont.application.giftcard.GiftCardOrderService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -44,7 +47,8 @@ class CartController(
     private val workflowEngine: WorkflowEngine,
     private val cartRepository: com.vernont.repository.cart.CartRepository,
     private val customerRepository: com.vernont.repository.customer.CustomerRepository,
-    private val giftCardOrderService: GiftCardOrderService
+    private val giftCardOrderService: GiftCardOrderService,
+    private val cartSessionService: CartSessionService
 ) {
 
     /**
@@ -65,7 +69,8 @@ class CartController(
     )
     suspend fun createCart(
         @RequestBody(required = false) request: StoreCreateCartRequest?,
-        @RequestHeader(value = "X-Request-ID", required = false) requestId: String?
+        @RequestHeader(value = "X-Request-ID", required = false) requestId: String?,
+        response: HttpServletResponse
     ): ResponseEntity<Any> {
 
         val correlationId = requestId ?: "req_${UUID.randomUUID()}"
@@ -134,6 +139,9 @@ class CartController(
                     val cartDto = cartResponse.cart
                     logger.info { "Cart created successfully: cartId=${cartDto.id}" }
 
+                    // Set HTTP-only session cookie for cart
+                    cartSessionService.setCartId(response, cartDto.id)
+
                     ResponseEntity.status(HttpStatus.CREATED).body(mapOf(
                         "cart" to mapToStoreCart(cartDto)
                     ))
@@ -172,6 +180,94 @@ class CartController(
         } catch (e: Exception) {
             logger.error(e) { "Exception creating cart" }
 
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(mapOf(
+                "error" to mapOf(
+                    "message" to "Internal server error",
+                    "code" to "INTERNAL_ERROR"
+                )
+            ))
+        }
+    }
+
+    /**
+     * Get current cart from session cookie
+     * GET /store/carts/current
+     *
+     * Retrieves the cart associated with the current session cookie.
+     * This is the recommended way to get cart - no client-side storage needed.
+     * Returns 404 if no cart session exists or cart is completed.
+     */
+    @Operation(summary = "Get current cart from session")
+    @GetMapping("/current")
+    fun getCurrentCart(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        @org.springframework.security.core.annotation.AuthenticationPrincipal userContext: com.vernont.domain.auth.UserContext?
+    ): ResponseEntity<Any> {
+        val cartId = cartSessionService.getCartId(request)
+
+        if (cartId == null) {
+            logger.debug { "No cart session found" }
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf(
+                "error" to mapOf(
+                    "message" to "No active cart",
+                    "code" to "NO_CART_SESSION"
+                )
+            ))
+        }
+
+        logger.info { "Retrieving cart from session: cartId=$cartId" }
+
+        return try {
+            val cart = cartRepository.findWithItemsByIdAndDeletedAtIsNull(cartId)
+
+            if (cart == null) {
+                // Cart not found - clear the stale cookie
+                cartSessionService.clearCartSession(response)
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf(
+                    "error" to mapOf(
+                        "message" to "Cart not found",
+                        "code" to "CART_NOT_FOUND"
+                    )
+                ))
+            }
+
+            // Check if cart is completed - if so, clear cookie and return 404
+            if (cart.completedAt != null) {
+                logger.info { "Cart is completed, clearing session: cartId=$cartId" }
+                cartSessionService.clearCartSession(response)
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf(
+                    "error" to mapOf(
+                        "message" to "Cart has been completed",
+                        "code" to "CART_COMPLETED"
+                    )
+                ))
+            }
+
+            // SECURITY: Validate cart ownership if cart belongs to a customer
+            if (cart.customerId != null) {
+                val context = userContext ?: getCurrentUserContext()
+                if (context == null || context.customerId != cart.customerId) {
+                    logger.warn { "Unauthorized cart access attempt: cartId=$cartId, requesterId=${context?.customerId}" }
+                    // Clear the invalid session
+                    cartSessionService.clearCartSession(response)
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(mapOf(
+                        "error" to mapOf(
+                            "message" to "You don't have permission to access this cart",
+                            "code" to "CART_ACCESS_DENIED"
+                        )
+                    ))
+                }
+            }
+
+            logger.info { "Cart retrieved from session: cartId=${cart.id}" }
+
+            ResponseEntity.ok(mapOf(
+                "cart" to mapToStoreCart(com.vernont.workflow.flows.cart.dto.CartDto.from(cart).cart)
+            ))
+
+        } catch (e: Exception) {
+            logger.error(e) { "Exception retrieving cart from session" }
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(mapOf(
                 "error" to mapOf(
                     "message" to "Internal server error",
@@ -932,7 +1028,8 @@ class CartController(
     suspend fun confirmPayment(
         @PathVariable id: String,
         @RequestBody request: StoreConfirmPaymentRequest,
-        @RequestHeader(value = "X-Request-ID", required = false) requestId: String?
+        @RequestHeader(value = "X-Request-ID", required = false) requestId: String?,
+        response: HttpServletResponse
     ): ResponseEntity<Any> {
         val correlationId = requestId ?: "req_${UUID.randomUUID()}"
         logger.info { "Confirming payment for cart: cartId=$id, paymentIntentId=${request.paymentIntentId}" }
@@ -957,6 +1054,10 @@ class CartController(
                 result.isSuccess() -> {
                     val confirmation = result.getOrNull()!!
                     logger.info { "Payment confirmed: cartId=$id, orderId=${confirmation.orderId}" }
+
+                    // Clear cart session cookie - cart is now complete
+                    cartSessionService.clearCartSession(response)
+                    logger.info { "Cart session cleared after successful payment: cartId=$id" }
 
                     ResponseEntity.ok(mapOf(
                         "type" to "order",

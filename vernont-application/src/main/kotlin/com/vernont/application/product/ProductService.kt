@@ -206,6 +206,7 @@ class ProductService(
             request.width?.let { width = it }
             request.originCountry?.let { originCountry = it }
             request.material?.let { material = it }
+            request.metadata?.let { metadata = it.toMutableMap() }
 
             request.collectionId?.let { collectionId ->
                 collection = productCollectionRepository.findByIdAndDeletedAtIsNull(collectionId)

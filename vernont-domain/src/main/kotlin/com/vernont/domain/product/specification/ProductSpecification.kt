@@ -168,7 +168,14 @@ object ProductSpecification {
     fun withTitleLike(query: String?): Specification<Product>? {
         if (query.isNullOrBlank()) return null
         return Specification { root, _, cb ->
-            cb.like(cb.lower(root.get("title")), "%${query.lowercase()}%")
+            val variants = root.join<Product, ProductVariant>("variants", JoinType.LEFT)
+
+            // Search in title OR variant SKU/barcode
+            cb.or(
+                cb.like(cb.lower(root.get("title")), "%${query.lowercase()}%"),
+                cb.like(cb.lower(variants.get("sku")), "%${query.lowercase()}%"),
+                cb.like(cb.lower(variants.get("barcode")), "%${query.lowercase()}%")
+            )
         }
     }
 

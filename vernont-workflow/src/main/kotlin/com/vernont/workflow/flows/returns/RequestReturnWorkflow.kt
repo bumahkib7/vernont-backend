@@ -168,8 +168,12 @@ class RequestReturnWorkflow(
                         throw IllegalStateException("Order is deleted: $orderId")
                     }
 
-                    // Validate ownership
-                    if (input.customerId != null && order.customerId != input.customerId) {
+                    // Validate ownership - check customer ID OR email match
+                    val isOwner = input.customerId != null && order.customerId == input.customerId
+                    val isEmailMatch = input.customerEmail != null &&
+                        order.email.equals(input.customerEmail, ignoreCase = true)
+
+                    if (!isOwner && !isEmailMatch) {
                         throw IllegalArgumentException("Order does not belong to this customer")
                     }
 

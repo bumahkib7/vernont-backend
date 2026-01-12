@@ -75,6 +75,24 @@ class ShippingOption : BaseEntity() {
     @Column(columnDefinition = "jsonb")
     var data: MutableMap<String, Any>? = null
 
+    /**
+     * Minimum estimated delivery days from order placement
+     */
+    @Column(name = "estimated_days_min")
+    var estimatedDaysMin: Int? = null
+
+    /**
+     * Maximum estimated delivery days from order placement
+     */
+    @Column(name = "estimated_days_max")
+    var estimatedDaysMax: Int? = null
+
+    /**
+     * Carrier name (e.g., "Royal Mail", "DHL", "UPS")
+     */
+    @Column(length = 100)
+    var carrier: String? = null
+
     fun activate() {
         this.isActive = true
     }

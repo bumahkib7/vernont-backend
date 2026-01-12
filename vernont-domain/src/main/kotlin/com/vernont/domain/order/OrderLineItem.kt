@@ -28,6 +28,9 @@ class OrderLineItem : BaseEntity() {
     @JoinColumn(name = "order_id", nullable = false)
     var order: Order? = null
 
+    @Column(name = "product_id")
+    var productId: String? = null
+
     @Column(name = "variant_id")
     var variantId: String? = null
 

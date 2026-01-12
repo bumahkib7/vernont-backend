@@ -133,6 +133,9 @@ class CompleteCartWorkflow(
                         val orderItem = OrderLineItem()
                         orderItem.order = order
                         orderItem.variantId = cartItem.variantId
+                        // Look up product ID from variant for verified purchase checks
+                        val variant = productVariantRepository.findByIdAndDeletedAtIsNull(cartItem.variantId)
+                        orderItem.productId = variant?.product?.id
                         orderItem.title = cartItem.title
                         orderItem.description = cartItem.description
                         orderItem.thumbnail = cartItem.thumbnail

@@ -402,7 +402,8 @@ class StorefrontProductService(
                     currency = price?.currencyCode,
                     inventoryQuantity = null
                 )
-            }
+            },
+            metadata = product.metadata
         )
     }
 }
