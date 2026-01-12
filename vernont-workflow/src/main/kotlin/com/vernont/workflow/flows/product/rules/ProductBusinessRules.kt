@@ -3,6 +3,7 @@ package com.vernont.workflow.flows.product.rules
 import com.vernont.domain.product.Product
 import com.vernont.domain.product.ProductStatus
 import com.vernont.workflow.flows.product.CreateProductInput
+import com.vernont.workflow.flows.product.ImageInput
 import com.vernont.workflow.flows.product.ProductVariantInput
 import java.math.BigDecimal
 
@@ -260,14 +261,14 @@ object ImageRules {
         }
     }
 
-    fun validateForCreate(images: List<String>): Result<Unit> {
+    fun validateForCreate(images: List<ImageInput>): Result<Unit> {
         if (images.size > MAX_IMAGES) {
             return Result.failure(
                 InvalidImageException("Maximum $MAX_IMAGES images allowed, got ${images.size}")
             )
         }
-        for ((index, source) in images.withIndex()) {
-            validateSource(source).onFailure { e ->
+        for ((index, imageInput) in images.withIndex()) {
+            validateSource(imageInput.url).onFailure { e ->
                 return Result.failure(
                     InvalidImageException("Image ${index + 1}: ${e.message}")
                 )

@@ -231,6 +231,18 @@ app:
         attempts: ${REGISTER_RATE_LIMIT_ATTEMPTS:3}
         window-minutes: ${REGISTER_RATE_LIMIT_WINDOW:60}
 
+  # IPQualityScore IP Intelligence Configuration
+  # API Docs: https://www.ipqualityscore.com/documentation/overview
+  ipqs:
+    api-key: ${IPQS_API_KEY:}
+    enabled: ${IPQS_ENABLED:true}
+    timeout-ms: ${IPQS_TIMEOUT_MS:5000}
+    cache-ttl-hours: ${IPQS_CACHE_TTL_HOURS:24}
+
+  # IP Security Filter Configuration
+  ip-security:
+    enabled: ${IP_SECURITY_ENABLED:true}
+
 # HTTP-Only Cookie Auth Configuration
 auth:
   cookie:
@@ -252,9 +264,9 @@ stripe:
 shipengine:
   enabled: ${SHIPENGINE_ENABLED:true}
   api-key: ${SHIPENGINE_API_KEY:}
-  sandbox-api-key: ${SHIPENGINE_SANDBOX_API_KEY:TEST_CK9b3idl5rEBh01WO8oh0eikQH8R2GIRpFIHAtiUgAY}
+  sandbox-api-key: ${SHIPENGINE_SANDBOX_API_KEY:}
   use-sandbox: ${SHIPENGINE_USE_SANDBOX:true}
-  default-carrier-id: ${SHIPENGINE_DEFAULT_CARRIER_ID:se-358070}
+  default-carrier-id: ${SHIPENGINE_DEFAULT_CARRIER_ID:}
   default-service-code: ${SHIPENGINE_DEFAULT_SERVICE_CODE:ups_worldwide_expedited}
   label-format: ${SHIPENGINE_LABEL_FORMAT:pdf}
   # NOTE: Sandbox carriers are US-based. For production UK shipping, set env vars to your UK warehouse.

@@ -2,7 +2,9 @@ package com.vernont.api.controller
 
 import com.vernont.api.auth.CookieProperties
 import com.vernont.api.auth.JwtTokenProvider
+import com.vernont.application.security.SessionTrackingService
 import com.vernont.domain.auth.Role
+import com.vernont.infrastructure.security.SessionDto
 import com.vernont.infrastructure.config.Argon2PasswordEncoder
 import com.vernont.repository.auth.UserRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -32,7 +34,8 @@ class InternalAuthController(
         private val passwordEncoder: PasswordEncoder,
         private val argon2PasswordEncoder: Argon2PasswordEncoder,
         private val jwtTokenProvider: JwtTokenProvider,
-        private val cookieProperties: CookieProperties
+        private val cookieProperties: CookieProperties,
+        private val sessionTrackingService: SessionTrackingService
 ) {
 
         companion object {
@@ -95,6 +98,26 @@ class InternalAuthController(
                 response.addCookie(refreshCookie)
         }
 
+        /** Get client IP address from request */
+        private fun getClientIpAddress(request: HttpServletRequest): String {
+                val xForwardedFor = request.getHeader("X-Forwarded-For")
+                if (!xForwardedFor.isNullOrBlank()) {
+                        return xForwardedFor.split(",").first().trim()
+                }
+
+                val xRealIp = request.getHeader("X-Real-IP")
+                if (!xRealIp.isNullOrBlank()) {
+                        return xRealIp.trim()
+                }
+
+                val cfConnectingIp = request.getHeader("CF-Connecting-IP")
+                if (!cfConnectingIp.isNullOrBlank()) {
+                        return cfConnectingIp.trim()
+                }
+
+                return request.remoteAddr ?: "unknown"
+        }
+
         data class InternalLoginRequest(
                 @field:Email(message = "Please provide a valid email address")
                 @field:NotBlank(message = "Email is required")
@@ -135,6 +158,7 @@ class InternalAuthController(
         @PostMapping("/login")
         fun login(
                 @Valid @RequestBody request: InternalLoginRequest,
+                servletRequest: HttpServletRequest,
                 response: HttpServletResponse
         ): ResponseEntity<Any> {
                 val normalizedEmail = request.email.lowercase().trim()
@@ -232,6 +256,20 @@ class InternalAuthController(
 
                         // Set HTTP-only cookies
                         setAuthCookies(response, accessToken, refreshToken)
+
+                        // Track admin session
+                        try {
+                                val ipAddress = getClientIpAddress(servletRequest)
+                                val userAgent = servletRequest.getHeader("User-Agent")
+                                sessionTrackingService.trackSession(
+                                        userId = user.id,
+                                        sessionToken = accessToken,
+                                        ipAddress = ipAddress,
+                                        userAgent = userAgent
+                                )
+                        } catch (e: Exception) {
+                                logger.warn(e) { "Failed to track session for user ${user.id}" }
+                        }
 
                         return ResponseEntity.ok(
                                 InternalAuthResponse(
@@ -424,6 +462,55 @@ class InternalAuthController(
                 return ResponseEntity.ok(mapOf("message" to "Logged out successfully"))
         }
 
+        data class HeartbeatResponse(
+                val session: SessionDto?,
+                val status: String
+        )
+
+        @Operation(
+                summary = "Session Heartbeat",
+                description = "Keep session alive and update last activity"
+        )
+        @ApiResponses(
+                value =
+                        [
+                                ApiResponse(responseCode = "200", description = "Heartbeat successful"),
+                                ApiResponse(responseCode = "401", description = "Session not found or expired")]
+        )
+        @PostMapping("/heartbeat")
+        fun heartbeat(servletRequest: HttpServletRequest): ResponseEntity<Any> {
+                val accessToken = servletRequest.cookies?.find { it.name == ACCESS_TOKEN_COOKIE }?.value
+
+                if (accessToken.isNullOrBlank()) {
+                        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(
+                                        mapOf(
+                                                "error" to "NO_SESSION",
+                                                "message" to "No active session"
+                                        )
+                                )
+                }
+
+                val session = sessionTrackingService.heartbeat(accessToken)
+
+                return if (session != null) {
+                        ResponseEntity.ok(
+                                HeartbeatResponse(
+                                        session = SessionDto.from(session),
+                                        status = "active"
+                                )
+                        )
+                } else {
+                        ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(
+                                        mapOf(
+                                                "error" to "SESSION_EXPIRED",
+                                                "message" to "Session expired or not found"
+                                        )
+                                )
+                }
+        }
+
         data class InternalMeResponse(
                 val id: String,
                 val email: String,
@@ -522,6 +609,229 @@ class InternalAuthController(
                                         mapOf(
                                                 "error" to "ME_FAILED",
                                                 "message" to "Failed to retrieve user information."
+                                        )
+                                )
+                }
+        }
+
+        data class UpdateProfileRequest(
+                val firstName: String? = null,
+                val lastName: String? = null
+        )
+
+        @Operation(
+                summary = "Update Current User Profile",
+                description = "Update the authenticated user's profile information"
+        )
+        @ApiResponses(
+                value =
+                        [
+                                ApiResponse(
+                                        responseCode = "200",
+                                        description = "Profile updated successfully"
+                                ),
+                                ApiResponse(
+                                        responseCode = "401",
+                                        description = "Not authenticated"
+                                )]
+        )
+        @PutMapping("/me")
+        fun updateMe(@Valid @RequestBody request: UpdateProfileRequest): ResponseEntity<Any> {
+                logger.info { "Internal /me PUT endpoint called" }
+                try {
+                        val authentication = SecurityContextHolder.getContext().authentication
+
+                        if (authentication == null ||
+                                        !authentication.isAuthenticated ||
+                                        "anonymousUser" == authentication.principal
+                        ) {
+                                logger.warn { "Internal /me PUT failed - no authenticated user" }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "UNAUTHENTICATED",
+                                                        "message" to "No authenticated user found."
+                                                )
+                                        )
+                        }
+
+                        val principal = authentication.principal
+                        val userId =
+                                when (principal) {
+                                        is com.vernont.domain.auth.UserContext ->
+                                                principal.userId
+                                        else -> authentication.name
+                                }
+
+                        val user =
+                                userRepository.findByIdWithRoles(userId)
+                                        ?: userRepository.findByEmailWithRoles(authentication.name)
+
+                        if (user == null || !user.isActive) {
+                                logger.warn {
+                                        "Internal /me PUT failed - user not found or inactive: $userId"
+                                }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "USER_NOT_FOUND",
+                                                        "message" to
+                                                                "User not found or account deactivated"
+                                                )
+                                        )
+                        }
+
+                        // Update profile fields
+                        request.firstName?.let { user.firstName = it }
+                        request.lastName?.let { user.lastName = it }
+
+                        userRepository.save(user)
+
+                        val primaryRole =
+                                user.roles.firstOrNull { it.name == Role.ADMIN }?.name
+                                        ?: user.roles
+                                                .firstOrNull { it.name == Role.DEVELOPER }
+                                                ?.name
+                                                ?: user.roles
+                                                .firstOrNull { it.name == Role.CUSTOMER_SERVICE }
+                                                ?.name
+                                                ?: user.roles.firstOrNull()?.name ?: "USER"
+
+                        logger.info { "Profile updated for user: ${user.id}" }
+
+                        return ResponseEntity.ok(
+                                InternalMeResponse(
+                                        id = user.id,
+                                        email = user.email,
+                                        firstName = user.firstName,
+                                        lastName = user.lastName,
+                                        role = primaryRole
+                                )
+                        )
+                } catch (e: Exception) {
+                        logger.error(e) { "Internal /me PUT endpoint processing failed" }
+                        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .body(
+                                        mapOf(
+                                                "error" to "UPDATE_FAILED",
+                                                "message" to "Failed to update profile."
+                                        )
+                                )
+                }
+        }
+
+        data class ChangePasswordRequest(
+                @field:NotBlank(message = "Current password is required")
+                val currentPassword: String,
+                @field:NotBlank(message = "New password is required")
+                val newPassword: String
+        )
+
+        @Operation(
+                summary = "Change Password",
+                description = "Change the authenticated user's password"
+        )
+        @ApiResponses(
+                value =
+                        [
+                                ApiResponse(
+                                        responseCode = "200",
+                                        description = "Password changed successfully"
+                                ),
+                                ApiResponse(
+                                        responseCode = "400",
+                                        description = "Invalid current password"
+                                ),
+                                ApiResponse(
+                                        responseCode = "401",
+                                        description = "Not authenticated"
+                                )]
+        )
+        @PutMapping("/me/password")
+        fun changePassword(@Valid @RequestBody request: ChangePasswordRequest): ResponseEntity<Any> {
+                logger.info { "Internal /me/password PUT endpoint called" }
+                try {
+                        val authentication = SecurityContextHolder.getContext().authentication
+
+                        if (authentication == null ||
+                                        !authentication.isAuthenticated ||
+                                        "anonymousUser" == authentication.principal
+                        ) {
+                                logger.warn { "Internal /me/password PUT failed - no authenticated user" }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "UNAUTHENTICATED",
+                                                        "message" to "No authenticated user found."
+                                                )
+                                        )
+                        }
+
+                        val principal = authentication.principal
+                        val userId =
+                                when (principal) {
+                                        is com.vernont.domain.auth.UserContext ->
+                                                principal.userId
+                                        else -> authentication.name
+                                }
+
+                        val user =
+                                userRepository.findByIdWithRoles(userId)
+                                        ?: userRepository.findByEmailWithRoles(authentication.name)
+
+                        if (user == null || !user.isActive) {
+                                logger.warn {
+                                        "Internal /me/password PUT failed - user not found or inactive: $userId"
+                                }
+                                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "USER_NOT_FOUND",
+                                                        "message" to
+                                                                "User not found or account deactivated"
+                                                )
+                                        )
+                        }
+
+                        // Verify current password
+                        if (!passwordEncoder.matches(request.currentPassword, user.passwordHash)) {
+                                logger.warn { "Password change failed - invalid current password for user: ${user.id}" }
+                                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "INVALID_PASSWORD",
+                                                        "message" to "Current password is incorrect"
+                                                )
+                                        )
+                        }
+
+                        // Validate new password length
+                        if (request.newPassword.length < 8) {
+                                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                                        .body(
+                                                mapOf(
+                                                        "error" to "WEAK_PASSWORD",
+                                                        "message" to "Password must be at least 8 characters"
+                                                )
+                                        )
+                        }
+
+                        // Hash new password with Argon2
+                        user.passwordHash = argon2PasswordEncoder.encode(request.newPassword)
+                        userRepository.save(user)
+
+                        logger.info { "Password changed for user: ${user.id}" }
+
+                        return ResponseEntity.ok(
+                                mapOf("message" to "Password changed successfully")
+                        )
+                } catch (e: Exception) {
+                        logger.error(e) { "Internal /me/password PUT endpoint processing failed" }
+                        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                .body(
+                                        mapOf(
+                                                "error" to "PASSWORD_CHANGE_FAILED",
+                                                "message" to "Failed to change password."
                                         )
                                 )
                 }

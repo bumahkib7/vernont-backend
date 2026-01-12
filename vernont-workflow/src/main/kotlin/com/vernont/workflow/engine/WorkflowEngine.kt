@@ -159,6 +159,11 @@ class WorkflowContext {
      */
     fun recordStepStart(stepName: String, input: Any?, totalSteps: Int = 0): Int {
         val stepIndex = stepCounter.getAndIncrement()
+        if (eventPublisher == null) {
+            logger.warn { "recordStepStart: eventPublisher is NULL for step $stepName (executionId=$executionId)" }
+        } else {
+            logger.info { "recordStepStart: Publishing step $stepName (executionId=$executionId, stepIndex=$stepIndex)" }
+        }
         eventPublisher?.publishStepStarted(
             executionId = executionId ?: "",
             workflowName = workflowName ?: "",

@@ -60,7 +60,7 @@ class Phase3Finalize(
     private val objectMapper: ObjectMapper
 ) {
     companion object {
-        const val MIN_IMAGES_REQUIRED = 1
+        const val MIN_IMAGES_FOR_READY = 1
         const val INTERVENTION_TYPE_FAILED_PRODUCT = "FAILED_PRODUCT_CREATION"
     }
 
@@ -151,12 +151,15 @@ class Phase3Finalize(
         // 4. DETERMINE FINAL STATUS
         // ====================================================================
         val totalImages = product.images.size
-        val hasMinimumImages = totalImages >= MIN_IMAGES_REQUIRED
+        val hasMinimumImages = totalImages >= MIN_IMAGES_FOR_READY
         val hasAnyPermanentFailures = uploadResult.hasPermanentFailures
 
+        // Products with images are READY, products without images go to DRAFT
+        // Only set FAILED if there were actual upload failures (not just missing images)
         val finalStatus = when {
             hasMinimumImages -> ProductStatus.READY
-            else -> ProductStatus.FAILED
+            hasAnyPermanentFailures -> ProductStatus.FAILED  // Had images but they failed permanently
+            else -> ProductStatus.DRAFT  // No images provided, product is in draft
         }
 
         product.status = finalStatus
@@ -182,12 +185,19 @@ class Phase3Finalize(
                 "thumbnail" to thumbnailUrl
             )
 
-            if (finalStatus == ProductStatus.READY) {
-                execution.markAsCompletedWithResult(productId, resultPayload)
-            } else {
-                execution.status = WorkflowExecutionStatus.FAILED
-                execution.errorMessage = "Product creation failed: insufficient images"
-                execution.resultPayload = resultPayload
+            when (finalStatus) {
+                ProductStatus.READY, ProductStatus.DRAFT -> {
+                    // Both READY and DRAFT are successful outcomes
+                    execution.markAsCompletedWithResult(productId, resultPayload)
+                }
+                ProductStatus.FAILED -> {
+                    execution.status = WorkflowExecutionStatus.FAILED
+                    execution.errorMessage = "Product creation failed: image upload failures"
+                    execution.resultPayload = resultPayload
+                }
+                else -> {
+                    execution.markAsCompletedWithResult(productId, resultPayload)
+                }
             }
             workflowExecutionRepository.save(execution)
         }
@@ -195,10 +205,10 @@ class Phase3Finalize(
         // ====================================================================
         // 7. QUEUE OUTBOX EVENT
         // ====================================================================
-        val eventType = if (finalStatus == ProductStatus.READY) {
-            "ProductCreationCompleted"
-        } else {
-            "ProductCreationFailed"
+        val eventType = when (finalStatus) {
+            ProductStatus.READY -> "ProductCreationCompleted"
+            ProductStatus.DRAFT -> "ProductCreatedAsDraft"
+            else -> "ProductCreationFailed"
         }
 
         val outboxEvent = OutboxEvent.create(
@@ -245,9 +255,9 @@ class Phase3Finalize(
                     entityId = productId,
                     title = "Failed product creation: ${product.handle}",
                     description = buildString {
-                        append("Product creation failed due to insufficient images.\n")
+                        append("Product creation failed due to image upload failures.\n")
                         append("Product: ${product.title} (${product.handle})\n")
-                        append("Required: $MIN_IMAGES_REQUIRED images, Got: $totalImages\n\n")
+                        append("Images: $totalImages\n\n")
                         if (uploadResult.failedUploads.isNotEmpty()) {
                             append("Failed uploads:\n")
                             uploadResult.failedUploads.forEach {

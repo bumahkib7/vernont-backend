@@ -3,11 +3,13 @@ package com.vernont.workflow.flows.product.phases
 import com.vernont.domain.product.PendingImageUpload
 import com.vernont.domain.product.PendingUploadStatus
 import com.vernont.infrastructure.storage.ProductImageStorageService
+import com.vernont.infrastructure.storage.StorageService
 import com.vernont.repository.product.PendingImageUploadRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
+import java.net.URI
 
 private val logger = KotlinLogging.logger {}
 
@@ -71,6 +73,7 @@ data class FailedUpload(
 class Phase2Upload(
     private val pendingImageUploadRepository: PendingImageUploadRepository,
     private val productImageStorageService: ProductImageStorageService,
+    private val storageService: StorageService,
     private val transactionTemplate: TransactionTemplate
 ) {
 
@@ -274,6 +277,111 @@ class Phase2Upload(
             upload.markFailed(error)
             pendingImageUploadRepository.save(upload)
         } ?: throw IllegalStateException("Transaction returned null")
+    }
+
+    /**
+     * Upload a single image by its pending upload ID
+     * Used by CreateProductWorkflow for per-image step tracking
+     *
+     * @param productId The product ID
+     * @param pendingUploadId The pending upload record ID
+     * @param onProgress Optional progress callback
+     * @return CompletedUpload if successful, null if failed
+     */
+    fun uploadSingleImage(
+        productId: String,
+        pendingUploadId: String,
+        onProgress: Phase2ProgressCallback? = null
+    ): CompletedUpload? {
+        logger.debug { "Phase2Upload: Uploading single image $pendingUploadId for product $productId" }
+
+        val upload = pendingImageUploadRepository.findById(pendingUploadId).orElse(null)
+        if (upload == null) {
+            logger.warn { "Phase2Upload: Pending upload not found: $pendingUploadId" }
+            return null
+        }
+
+        onProgress?.invoke(1, 1, "Starting upload...", 0)
+
+        try {
+            // Mark in progress
+            markUploadInProgress(upload.id)
+            onProgress?.invoke(1, 1, "Uploading image...", 25)
+
+            // Perform actual upload (outside transaction)
+            val resultUrl = runBlocking {
+                uploadImageToStorage(upload.sourceUrl, productId)
+            }
+            onProgress?.invoke(1, 1, "Finalizing...", 75)
+
+            // Mark completed
+            markUploadCompleted(upload.id, resultUrl)
+            onProgress?.invoke(1, 1, "Complete", 100)
+
+            logger.info { "Phase2Upload: Successfully uploaded image $pendingUploadId -> $resultUrl" }
+            return CompletedUpload(
+                uploadId = upload.id,
+                sourceUrl = upload.sourceUrl,
+                resultUrl = resultUrl,
+                position = upload.position
+            )
+
+        } catch (e: Exception) {
+            logger.warn(e) { "Phase2Upload: Failed to upload image $pendingUploadId: ${e.message}" }
+            markUploadFailed(upload.id, e.message ?: "Upload failed")
+            return null
+        }
+    }
+
+    /**
+     * Upload image to S3 storage
+     */
+    private suspend fun uploadImageToStorage(sourceUrl: String, productId: String): String {
+        val result = productImageStorageService.uploadAndResolveUrlsWithResult(
+            listOf(sourceUrl),
+            productId
+        )
+
+        if (result.uploadedUrls.isEmpty()) {
+            val error = result.failedSources.firstOrNull()?.error ?: "Upload returned no URL"
+            throw ImageUploadException(error)
+        }
+
+        return result.uploadedUrls.first()
+    }
+
+    /**
+     * Delete an uploaded image from S3 (used for compensation)
+     *
+     * @param imageUrl The S3 URL of the image to delete
+     */
+    suspend fun deleteUploadedImage(imageUrl: String) {
+        logger.info { "Phase2Upload: Deleting uploaded image: $imageUrl" }
+        try {
+            // Extract the S3 key from the URL
+            val key = extractS3Key(imageUrl)
+            if (key != null) {
+                storageService.deleteFile(key)
+                logger.debug { "Phase2Upload: Successfully deleted image: $key" }
+            } else {
+                logger.warn { "Phase2Upload: Could not extract S3 key from URL: $imageUrl" }
+            }
+        } catch (e: Exception) {
+            logger.warn(e) { "Phase2Upload: Failed to delete image (compensation): $imageUrl" }
+            // Don't throw - compensation is best-effort
+        }
+    }
+
+    /**
+     * Extract the S3 key from a full URL
+     */
+    private fun extractS3Key(url: String): String? {
+        return try {
+            val uri = URI(url)
+            uri.path.removePrefix("/")
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

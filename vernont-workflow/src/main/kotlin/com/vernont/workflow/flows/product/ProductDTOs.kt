@@ -9,12 +9,18 @@ data class CreateProductInput(
     val handle: String = "",
     val status: ProductStatus = ProductStatus.DRAFT,
     val shippingProfileId: String = "default",
-    val images: List<String> = emptyList(),
+    val images: List<ImageInput> = emptyList(),
     val thumbnail: String? = null,
     val options: List<ProductOptionInput> = emptyList(),
     val variants: List<ProductVariantInput> = emptyList(),
     val categoryIds: List<String> = emptyList(),
     val salesChannelIds: List<String> = emptyList()
+)
+
+data class ImageInput(
+    val url: String = "",
+    val altText: String? = null,
+    val position: Int? = null
 )
 
 

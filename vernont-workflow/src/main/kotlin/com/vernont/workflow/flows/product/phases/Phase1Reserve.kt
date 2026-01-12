@@ -296,11 +296,11 @@ class Phase1Reserve(
         // ====================================================================
         // 10. CREATE PENDING IMAGE UPLOADS
         // ====================================================================
-        val pendingUploads = input.images.mapIndexed { index, sourceUrl ->
+        val pendingUploads = input.images.mapIndexed { index, imageInput ->
             PendingImageUpload.create(
                 productId = savedProduct.id,
-                sourceUrl = sourceUrl,
-                position = index
+                sourceUrl = imageInput.url,
+                position = imageInput.position ?: index
             ).let { pendingImageUploadRepository.save(it) }
         }
 

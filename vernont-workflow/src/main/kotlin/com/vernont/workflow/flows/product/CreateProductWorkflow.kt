@@ -10,51 +10,30 @@ import com.vernont.workflow.engine.WorkflowResult
 import com.vernont.workflow.engine.WorkflowTypes
 import com.vernont.workflow.flows.product.phases.*
 import com.vernont.workflow.flows.product.rules.*
+import com.vernont.workflow.steps.StepResponse
+import com.vernont.workflow.steps.createStep
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Component
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Phased CreateProductWorkflow - Production-Safe Implementation
+ * CreateProductWorkflow - Fine-grained Step Tracking
  *
- * This workflow uses a three-phase architecture with proper WorkflowStep integration:
+ * This workflow creates products with detailed step-by-step progress tracking.
+ * Each operation is a separate tracked step visible in the workflow monitor.
  *
- * Step 1 - ReserveProductStep (Phase 1): Single short DB transaction (~50-100ms)
- *   - Validates idempotency
- *   - Validates all business rules
- *   - Creates product, options, variants, prices, inventory
- *   - Creates pending image upload records
- *   - Queues ProductCreationStarted outbox event
- *   - Compensation: None (DB rollback handles failure)
- *
- * Step 2 - UploadImagesStep (Phase 2): External I/O (5-30+ seconds)
- *   - Uploads images to S3 outside any transaction
- *   - Updates pending upload records individually
- *   - Reports progress via WebSocket
- *   - Compensation: Deletes uploaded S3 objects (external side effect)
- *
- * Step 3 - FinalizeProductStep (Phase 3): Single short DB transaction (~50-100ms)
- *   - Creates ProductImage entities from completed uploads
- *   - Sets product status to READY or FAILED
- *   - Cleans up pending upload records
- *   - Queues ProductCreationCompleted/Failed event
- *   - Compensation: None (DB rollback handles failure)
- *
- * Key features:
- *   - Idempotency: Safe to retry with same idempotency key
- *   - Short transactions: No external I/O inside DB transactions
- *   - Proper compensation: Only S3 uploads have compensation (external effects)
- *   - Step events: Uses WorkflowStep for consistent event publishing
- *   - Cleanup jobs: Automatic cleanup of failed products
- *   - Human intervention: Edge cases go to review queue
+ * Steps:
+ * 1. validate-input: Validate business rules (handle, title, options, variants, images)
+ * 2. reserve-product: Create product, options, variants, prices, inventory, pending uploads
+ * 3. upload-image-N: Upload each image to S3 (one step per image)
+ * 4. finalize-product: Create ProductImage entities, set final status, publish events
  */
 @Component
 @WorkflowTypes(input = CreateProductInput::class, output = ProductResponse::class)
 class CreateProductWorkflow(
-    private val reserveStep: ReserveProductStep,
-    private val uploadStep: UploadImagesStep,
-    private val finalizeStep: FinalizeProductStep,
+    private val phase1Reserve: Phase1Reserve,
+    private val phase2Upload: Phase2Upload,
     private val phase3Finalize: Phase3Finalize,
     private val productRepository: ProductRepository
 ) : Workflow<CreateProductInput, ProductResponse> {
@@ -65,92 +44,166 @@ class CreateProductWorkflow(
         input: CreateProductInput,
         context: WorkflowContext
     ): WorkflowResult<ProductResponse> {
-        logger.info { "Starting phased product creation workflow for product: ${input.title}" }
+        logger.info { "Starting product creation workflow for: ${input.title} (handle: ${input.handle})" }
 
-        // Extract idempotency key from context or generate from handle
         val idempotencyKey = context.getMetadata("idempotencyKey") as? String
             ?: "create-product:${input.handle}"
-
-        val correlationId = context.getMetadata("correlationId") as? String
+        val correlationId = context.correlationId
 
         try {
             // ================================================================
-            // STEP 1: RESERVE (Short DB Transaction)
-            // Uses WorkflowStep for event publishing and logging
+            // STEP 1: VALIDATE INPUT
             // ================================================================
-            val reserveInput = ReserveStepInput(
-                productInput = input,
-                idempotencyKey = idempotencyKey,
-                correlationId = correlationId
+            val validateStep = createStep<CreateProductInput, Unit>(
+                name = "validate-input",
+                execute = { inp, _ ->
+                    logger.debug { "Validating input for product: ${inp.handle}" }
+                    ProductCreationRules.validateInput(inp).getOrThrow()
+                    logger.info { "Input validation passed for: ${inp.handle}" }
+                    StepResponse.of(Unit)
+                }
+            )
+            validateStep.invoke(input, context)
+
+            // ================================================================
+            // STEP 2: RESERVE PRODUCT (Phase 1)
+            // Creates: product, options, variants, prices, inventory, pending uploads
+            // ================================================================
+            val reserveStep = createStep<CreateProductInput, ReserveResult>(
+                name = "reserve-product",
+                execute = { inp, ctx ->
+                    logger.debug { "Reserving product: ${inp.handle}" }
+
+                    val result = phase1Reserve.execute(
+                        input = inp,
+                        idempotencyKey = idempotencyKey,
+                        correlationId = correlationId
+                    )
+
+                    ctx.addMetadata("productId", result.productId)
+                    ctx.addMetadata("executionId", result.executionId)
+
+                    logger.info { "Reserved product: ${result.productId} with ${result.pendingUploadIds.size} pending uploads" }
+                    StepResponse.of(result, result.productId)
+                }
             )
 
-            val reserveResponse = try {
-                reserveStep.invoke(reserveInput, context)
+            val reserveResult = try {
+                reserveStep.invoke(input, context).data
             } catch (e: IdempotentCompletedException) {
-                // Duplicate request - return cached result
                 logger.info { "Idempotent hit for ${input.handle}: returning cached result" }
                 return handleIdempotentCompleted(e.cachedPayload)
             } catch (e: IdempotentInProgressException) {
-                // Another request is in progress
                 logger.warn { "Workflow already in progress for ${input.handle}: ${e.executionId}" }
                 return WorkflowResult.failure(
                     IllegalStateException("Product creation already in progress. Execution ID: ${e.executionId}")
                 )
             } catch (e: IdempotentConflictException) {
-                // Lost race condition
                 logger.warn { "Idempotency conflict for ${input.handle}" }
                 return WorkflowResult.failure(
                     IllegalStateException("Concurrent request conflict. Please retry.")
                 )
             }
 
-            val reserveResult = reserveResponse.data
-            logger.info { "Step 1 completed: productId=${reserveResult.productId}, pendingUploads=${reserveResult.pendingUploadIds.size}" }
+            // ================================================================
+            // STEP 3: UPLOAD IMAGES (one step per image)
+            // Uses Phase2Upload which handles S3 operations
+            // ================================================================
+            val uploadResult = if (reserveResult.pendingUploadIds.isNotEmpty()) {
+                // Create individual steps for each image upload
+                val completedUploads = mutableListOf<CompletedUpload>()
+                val failedUploads = mutableListOf<FailedUpload>()
+
+                reserveResult.pendingUploadIds.forEachIndexed { index, uploadId ->
+                    val uploadImageStep = createStep<String, CompletedUpload?>(
+                        name = "upload-image-${index + 1}",
+                        execute = { pendingId, ctx ->
+                            logger.debug { "Uploading image $pendingId (${index + 1}/${reserveResult.pendingUploadIds.size})" }
+
+                            // Use Phase2Upload for single image
+                            val result = phase2Upload.uploadSingleImage(
+                                productId = reserveResult.productId,
+                                pendingUploadId = pendingId
+                            ) { current, total, message, percent ->
+                                ctx.publishStepProgress(
+                                    stepName = "upload-image-${index + 1}",
+                                    stepIndex = index + 3, // After validate and reserve
+                                    progressCurrent = current,
+                                    progressTotal = total,
+                                    progressMessage = message,
+                                    totalSteps = reserveResult.pendingUploadIds.size + 4
+                                )
+                            }
+
+                            if (result != null) {
+                                // Register compensation for S3 cleanup
+                                ctx.pushCompensation("upload-image-${index + 1}") {
+                                    phase2Upload.deleteUploadedImage(result.resultUrl)
+                                }
+                                logger.info { "Uploaded image ${index + 1}: ${result.resultUrl}" }
+                            } else {
+                                logger.warn { "Failed to upload image ${index + 1}" }
+                            }
+
+                            StepResponse.of(result)
+                        }
+                    )
+
+                    val uploadedImage = uploadImageStep.invoke(uploadId, context).data
+                    if (uploadedImage != null) {
+                        completedUploads.add(uploadedImage)
+                    } else {
+                        failedUploads.add(FailedUpload(
+                            uploadId = uploadId,
+                            sourceUrl = "",
+                            position = index,
+                            errorMessage = "Upload failed",
+                            isPermanent = false
+                        ))
+                    }
+                }
+
+                UploadResult(
+                    productId = reserveResult.productId,
+                    successCount = completedUploads.size,
+                    failureCount = failedUploads.size,
+                    permanentFailureCount = failedUploads.count { it.isPermanent },
+                    completedUrls = completedUploads,
+                    failedUploads = failedUploads
+                )
+            } else {
+                // No images to upload
+                UploadResult(
+                    productId = reserveResult.productId,
+                    successCount = 0,
+                    failureCount = 0,
+                    permanentFailureCount = 0,
+                    completedUrls = emptyList(),
+                    failedUploads = emptyList()
+                )
+            }
 
             // ================================================================
-            // STEP 2: UPLOAD (External I/O - No Transaction)
-            // Uses WorkflowStep with S3 compensation
+            // STEP 4: FINALIZE PRODUCT
+            // Creates ProductImage entities, sets status, publishes events
             // ================================================================
-            val uploadInput = UploadStepInput(
-                productId = reserveResult.productId,
-                pendingUploadIds = reserveResult.pendingUploadIds
+            val finalizeStep = createStep<FinalizeStepInput, FinalizeResult>(
+                name = "finalize-product",
+                execute = { finInput, _ ->
+                    logger.debug { "Finalizing product: ${finInput.productId}" }
+
+                    val result = phase3Finalize.execute(
+                        executionId = finInput.executionId,
+                        productId = finInput.productId,
+                        uploadResult = finInput.uploadResult,
+                        correlationId = finInput.correlationId
+                    )
+
+                    logger.info { "Finalized product with status: ${result.productStatus}" }
+                    StepResponse.of(result)
+                }
             )
 
-            val uploadResponse = try {
-                uploadStep.invoke(uploadInput, context)
-            } catch (e: Exception) {
-                // Phase 2 failed completely - run compensations and finalize with failure
-                logger.error(e) { "Step 2 failed completely for product ${reserveResult.productId}" }
-
-                // Run compensations (deletes S3 uploads)
-                context.runCompensations()
-
-                // Finalize with failure
-                phase3Finalize.handleCompleteFailure(
-                    executionId = reserveResult.executionId,
-                    productId = reserveResult.productId,
-                    error = "Image upload phase failed: ${e.message}",
-                    correlationId = correlationId
-                )
-
-                return WorkflowResult.failure(
-                    ProductCreationFailedException(
-                        reserveResult.productId,
-                        "Image upload failed: ${e.message}"
-                    )
-                )
-            }
-
-            val uploadResult = uploadResponse.data
-            logger.info {
-                "Step 2 completed: productId=${reserveResult.productId}, " +
-                "success=${uploadResult.successCount}, failures=${uploadResult.failureCount}"
-            }
-
-            // ================================================================
-            // STEP 3: FINALIZE (Short DB Transaction)
-            // Uses WorkflowStep for event publishing
-            // ================================================================
             val finalizeInput = FinalizeStepInput(
                 executionId = reserveResult.executionId,
                 productId = reserveResult.productId,
@@ -158,59 +211,51 @@ class CreateProductWorkflow(
                 correlationId = correlationId
             )
 
-            val finalizeResponse = try {
-                finalizeStep.invoke(finalizeInput, context)
+            val finalizeResult = try {
+                finalizeStep.invoke(finalizeInput, context).data
             } catch (e: Exception) {
-                // Finalize failed - run compensations (S3 cleanup)
-                logger.error(e) { "Step 3 failed for product ${reserveResult.productId}" }
+                logger.error(e) { "Finalize failed for product ${reserveResult.productId}" }
                 context.runCompensations()
                 throw e
-            }
-
-            val finalizeResult = finalizeResponse.data
-            logger.info {
-                "Step 3 completed: productId=${reserveResult.productId}, " +
-                "status=${finalizeResult.productStatus}, images=${finalizeResult.imageCount}"
             }
 
             // ================================================================
             // RETURN RESULT
             // ================================================================
-            if (finalizeResult.productStatus == ProductStatus.FAILED) {
-                logger.warn { "Product creation completed with FAILED status: ${reserveResult.productId}" }
-                // Don't run compensations - the product exists but needs manual attention
-                return WorkflowResult.failure(
-                    ProductCreationFailedException(
-                        reserveResult.productId,
-                        finalizeResult.interventionReason ?: "Product creation failed"
-                    )
-                )
-            }
-
-            // Fetch the final product for response
             val product = productRepository.findById(reserveResult.productId)
                 .orElseThrow { ProductNotFoundException(reserveResult.productId) }
 
-            logger.info { "Product created successfully: ${product.id} (${product.handle})" }
-            return WorkflowResult.success(ProductResponse.from(product))
+            return when (finalizeResult.productStatus) {
+                ProductStatus.FAILED -> {
+                    logger.warn { "Product creation completed with FAILED status: ${reserveResult.productId}" }
+                    WorkflowResult.failure(
+                        ProductCreationFailedException(
+                            reserveResult.productId,
+                            finalizeResult.interventionReason ?: "Product creation failed"
+                        )
+                    )
+                }
+                ProductStatus.DRAFT -> {
+                    logger.info { "Product created as DRAFT (no images): ${reserveResult.productId}" }
+                    WorkflowResult.success(ProductResponse.from(product))
+                }
+                else -> {
+                    logger.info { "Product created successfully: ${product.id} (${product.handle}) - status: ${product.status}" }
+                    WorkflowResult.success(ProductResponse.from(product))
+                }
+            }
 
         } catch (e: ProductWorkflowException) {
-            // Known business rule violation - run compensations
             logger.warn { "Product creation failed (business rule): ${e.message}" }
             context.runCompensations()
             return WorkflowResult.failure(e)
-
         } catch (e: Exception) {
-            // Unexpected error - run compensations
             logger.error(e) { "Product creation workflow failed unexpectedly: ${e.message}" }
             context.runCompensations()
             return WorkflowResult.failure(e)
         }
     }
 
-    /**
-     * Handle idempotent completion - return cached result
-     */
     private fun handleIdempotentCompleted(cachedPayload: Map<String, Any?>): WorkflowResult<ProductResponse> {
         val productId = cachedPayload["productId"] as? String
             ?: return WorkflowResult.failure(IllegalStateException("Cached result missing productId"))
@@ -221,3 +266,13 @@ class CreateProductWorkflow(
         return WorkflowResult.success(ProductResponse.from(product))
     }
 }
+
+/**
+ * Input for the finalize step
+ */
+data class FinalizeStepInput(
+    val executionId: String,
+    val productId: String,
+    val uploadResult: UploadResult,
+    val correlationId: String?
+)

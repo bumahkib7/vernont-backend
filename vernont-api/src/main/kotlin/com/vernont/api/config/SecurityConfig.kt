@@ -1,6 +1,7 @@
 package com.vernont.api.config
 
 import com.vernont.api.auth.JwtAuthenticationFilter
+import com.vernont.api.filter.IpSecurityFilter
 import com.vernont.domain.auth.Role
 import com.vernont.infrastructure.config.Argon2PasswordEncoder
 import org.springframework.beans.factory.annotation.Value
@@ -28,6 +29,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 @EnableMethodSecurity(prePostEnabled = true)
 class SecurityConfig(
         private val jwtAuthenticationFilter: JwtAuthenticationFilter,
+        private val ipSecurityFilter: IpSecurityFilter,
         private val argon2PasswordEncoder: Argon2PasswordEncoder,
         @Value(
                 "\${spring.security.cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:8080}"
@@ -333,6 +335,10 @@ class SecurityConfig(
                 .addFilterBefore(
                         jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter::class.java
+                )
+                .addFilterAfter(
+                        ipSecurityFilter,
+                        JwtAuthenticationFilter::class.java
                 )
 
         return http.build()

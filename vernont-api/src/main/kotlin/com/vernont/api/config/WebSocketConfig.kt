@@ -39,6 +39,7 @@ class WebSocketConfig(
     override fun configureMessageBroker(config: MessageBrokerRegistry) {
         config.enableSimpleBroker("/topic", "/queue") // Enable a simple in-memory broker for public topics and private queues
         config.setApplicationDestinationPrefixes("/app") // Prefix for messages from clients to the server
+        config.setUserDestinationPrefix("/user") // Enable user-specific messaging via /user/{userId}/queue/...
     }
 
     override fun configureClientInboundChannel(registration: ChannelRegistration) {
