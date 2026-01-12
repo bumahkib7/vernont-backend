@@ -1,12 +1,10 @@
 package com.vernont.workflow.flows.cart
 
+import com.vernont.application.cart.CartPromotionService
 import com.vernont.application.giftcard.GiftCardOrderService
 import com.vernont.domain.cart.Cart
-import com.vernont.domain.promotion.Discount
 import com.vernont.repository.cart.CartRepository
 import com.vernont.repository.customer.CustomerAddressRepository
-import com.vernont.repository.promotion.DiscountRepository
-import com.vernont.repository.promotion.PromotionRepository
 import com.vernont.repository.region.RegionRepository
 import com.vernont.workflow.engine.Workflow
 import com.vernont.workflow.engine.WorkflowContext
@@ -77,8 +75,7 @@ class UpdateCartWorkflow(
     private val cartRepository: CartRepository,
     private val regionRepository: RegionRepository,
     private val customerAddressRepository: CustomerAddressRepository,
-    private val promotionRepository: PromotionRepository,
-    private val discountRepository: DiscountRepository,
+    private val cartPromotionService: CartPromotionService,
     private val giftCardOrderService: GiftCardOrderService
 ) : Workflow<UpdateCartInput, CartResponse> {
 
@@ -181,65 +178,24 @@ class UpdateCartWorkflow(
             )
 
             // Step 5: Apply promo codes if provided
-            // SECURITY: Uses atomic operations to prevent race conditions
+            // Delegated to CartPromotionService for proper transaction management
             val applyPromotionsStep = createStep<UpdateCartInput, BigDecimal>(
                 name = "apply-promotions",
                 execute = { inp, ctx ->
                     val cart = ctx.getMetadata("cart") as Cart
 
-                    // If promo codes provided, apply them
+                    // If promo codes provided, apply them using the transactional service
                     if (!inp.promoCodes.isNullOrEmpty()) {
                         logger.info { "Applying ${inp.promoCodes.size} promo codes to cart: ${cart.id}" }
 
-                        // Remove existing discounts first - use atomic decrement
-                        val existingDiscounts = discountRepository.findByCartIdAndDeletedAtIsNull(cart.id)
-                        existingDiscounts.forEach { discount ->
-                            discount.promotion?.let { promotion ->
-                                // SECURITY: Use atomic decrement to prevent race conditions
-                                promotionRepository.atomicDecrementUsage(promotion.id)
-                            }
-                            discountRepository.delete(discount)
-                        }
+                        val result = cartPromotionService.applyPromoCodes(cart.id, inp.promoCodes)
 
-                        var totalDiscount = BigDecimal.ZERO
+                        // Reload cart to get updated state
+                        val updatedCart = cartRepository.findWithItemsByIdAndDeletedAtIsNull(cart.id)!!
+                        ctx.addMetadata("cart", updatedCart)
 
-                        inp.promoCodes.forEach { code ->
-                            // SECURITY: Use pessimistic lock to prevent concurrent applications
-                            val promotion = promotionRepository.findByCodeForApplication(code)
-                            if (promotion != null && promotion.isValid() && promotion.appliesToRegion(cart.regionId)) {
-                                // SECURITY: Atomic increment - returns 0 if limit reached
-                                val incrementResult = promotionRepository.atomicIncrementUsage(promotion.id)
-                                if (incrementResult == 0) {
-                                    logger.warn { "Promo code $code has reached usage limit" }
-                                    return@forEach
-                                }
-
-                                // Create and apply discount
-                                val discount = Discount.fromPromotion(promotion).apply {
-                                    this.cartId = cart.id
-                                    this.isValid = true
-                                    this.isApplied = false
-                                }
-                                discount.updateAmount(cart.subtotal)
-                                val savedDiscount = discountRepository.save(discount)
-                                savedDiscount.apply()
-                                discountRepository.save(savedDiscount)
-
-                                totalDiscount = totalDiscount.add(savedDiscount.amount)
-                                logger.info { "Applied promo code: $code, discount: ${savedDiscount.amount}" }
-                            } else {
-                                logger.warn { "Invalid or inapplicable promo code: $code" }
-                            }
-                        }
-
-                        // Update cart discount
-                        cart.discount = totalDiscount
-                        cart.discountTotal = totalDiscount
-                        cartRepository.save(cart)
-                        ctx.addMetadata("cart", cart)
-
-                        logger.info { "Total discount applied: $totalDiscount" }
-                        StepResponse.of(totalDiscount)
+                        logger.info { "Total discount applied: ${result.totalDiscount}" }
+                        StepResponse.of(result.totalDiscount)
                     } else {
                         StepResponse.of(cart.discount)
                     }
