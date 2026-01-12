@@ -164,16 +164,17 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
     ): List<Product>
 
     // Search suggestions using trigram similarity
+    // Note: CAST is required for PostgreSQL to determine parameter types in native queries
     @Query(
         value = """
             SELECT title FROM (
-                SELECT DISTINCT p.title, similarity(p.title, :query) AS sim
+                SELECT DISTINCT p.title, similarity(p.title, CAST(:query AS text)) AS sim
                 FROM product p
                 WHERE p.status = 'PUBLISHED'
                   AND p.deleted_at IS NULL
                   AND (
-                    p.title ILIKE CONCAT('%', :query, '%')
-                    OR similarity(p.title, :query) > 0.1
+                    p.title ILIKE CONCAT('%', CAST(:query AS text), '%')
+                    OR similarity(p.title, CAST(:query AS text)) > 0.1
                   )
                 ORDER BY sim DESC, p.title
                 LIMIT :limit
@@ -187,18 +188,19 @@ interface ProductRepository : JpaRepository<Product, String>, JpaSpecificationEx
     ): List<String>
 
     // Brand suggestions
+    // Note: CAST is required for PostgreSQL to determine parameter types in native queries
     @Query(
         value = """
             SELECT name FROM (
-                SELECT DISTINCT b.name, similarity(b.name, :query) AS sim
+                SELECT DISTINCT b.name, similarity(b.name, CAST(:query AS text)) AS sim
                 FROM brand b
                 JOIN product p ON p.brand_id = b.id
                 WHERE p.status = 'PUBLISHED'
                   AND p.deleted_at IS NULL
                   AND b.deleted_at IS NULL
                   AND (
-                    b.name ILIKE CONCAT('%', :query, '%')
-                    OR similarity(b.name, :query) > 0.2
+                    b.name ILIKE CONCAT('%', CAST(:query AS text), '%')
+                    OR similarity(b.name, CAST(:query AS text)) > 0.2
                   )
                 ORDER BY sim DESC, b.name
                 LIMIT :limit
