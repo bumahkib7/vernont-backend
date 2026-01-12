@@ -31,7 +31,14 @@ interface SecurityEventRepository : JpaRepository<SecurityEvent, String> {
 
     fun findByIpAddressAndDeletedAtIsNullOrderByCreatedAtDesc(ipAddress: String): List<SecurityEvent>
 
-    @Query("SELECT e FROM SecurityEvent e WHERE e.deletedAt IS NULL AND (:eventType IS NULL OR e.eventType = :eventType) AND (:severity IS NULL OR e.severity = :severity) AND (:resolved IS NULL OR e.resolved = :resolved) ORDER BY e.createdAt DESC")
+    @Query("""
+        SELECT * FROM security_event e
+        WHERE e.deleted_at IS NULL
+        AND (CAST(:eventType AS varchar) IS NULL OR e.event_type = CAST(:eventType AS varchar))
+        AND (CAST(:severity AS varchar) IS NULL OR e.severity = CAST(:severity AS varchar))
+        AND (CAST(:resolved AS boolean) IS NULL OR e.resolved = CAST(:resolved AS boolean))
+        ORDER BY e.created_at DESC
+    """, nativeQuery = true)
     fun findByFilters(eventType: SecurityEventType?, severity: EventSeverity?, resolved: Boolean?, pageable: Pageable): Page<SecurityEvent>
 
     @Query("SELECT COUNT(e) FROM SecurityEvent e WHERE e.deletedAt IS NULL AND e.resolved = false")
